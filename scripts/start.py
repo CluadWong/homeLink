@@ -211,11 +211,14 @@ def ensure_utf8_output() -> None:
     for stream in (sys.stdout, sys.stderr):
         if stream is None:
             continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
         try:
             if not stream.isatty():
-                stream.reconfigure(encoding="utf-8", errors="replace")
+                reconfigure(encoding="utf-8", errors="replace")
             else:
-                stream.reconfigure(errors="replace")
+                reconfigure(errors="replace")
         except (AttributeError, ValueError):
             # 某些包装过的 stdout 不支持 reconfigure，退回默认行为即可。
             continue
@@ -225,7 +228,9 @@ def _say(message: str) -> None:
     print(message, flush=True)
 
 
-def _spawn(command: list[str], *, env: dict[str, str], log_file: IO[bytes]) -> subprocess.Popen[bytes]:
+def _spawn(
+    command: list[str], *, env: dict[str, str], log_file: IO[bytes]
+) -> subprocess.Popen[bytes]:
     creationflags = 0
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -317,7 +322,9 @@ def main(argv: list[str] | None = None) -> int:
         _say("前端静态托管已关闭（frontend.enabled=false）：只提供 /api。")
     elif not dist_ready:
         _say(frontend_hint(dist))
-    _say(f"启动后端：uvicorn jj_butler.interface.api.app:app --host {args.host} --port {args.api_port}")
+    _say(
+        f"启动后端：uvicorn jj_butler.interface.api.app:app --host {args.host} --port {args.api_port}"
+    )
     _say(f"后端日志：{BACKEND_LOG}")
 
     log_file = BACKEND_LOG.open("ab")

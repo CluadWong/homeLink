@@ -575,7 +575,9 @@ def _parse_settings(raw: Mapping[str, Any]) -> Settings:
         frontend.get("enabled"), "settings.yaml:frontend.enabled", default=True
     )
     dist_path = (
-        _text(frontend.get("dist_path"), "settings.yaml:frontend.dist_path", "frontend/dist").strip()
+        _text(
+            frontend.get("dist_path"), "settings.yaml:frontend.dist_path", "frontend/dist"
+        ).strip()
         or "frontend/dist"
     )
 
