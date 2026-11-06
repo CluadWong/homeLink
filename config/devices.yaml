@@ -1,0 +1,8 @@
+# 只保留房间种子；设备一律由 POST /api/devices 在运行期创建。
+# rooms 每项必填 name；display_name、sort_order 可选（缺省为 name / 0）。
+rooms:
+  - name: bedroom
+    display_name: "卧室"
+    sort_order: 1
+  - name: living_room
+    display_name: "客厅"

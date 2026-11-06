@@ -1,0 +1,11 @@
+# 本地覆盖层示例（复制为 config/settings.local.yaml，该文件不入库）。
+# 只写需要覆盖的键，缺失即沿用 settings.yaml；优先级 *.local.yaml > *.yaml。
+#
+# 鉴权值没有 API，只能改这里并重启；不要把真实凭证提交进版本库。
+api:
+  token: ""
+gateway:
+  ir:
+    base_url: "http://192.168.1.50"
+    username: ""
+    password: ""

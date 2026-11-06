@@ -1,0 +1,159 @@
+# API 契约
+
+## 1. 通用规则
+
+- 全部端点前缀 `/api`，请求与响应均为 UTF-8 JSON；无文件上传、无表单。
+- 鉴权：`Authorization: Bearer <token>`。`api.token` 为空（仓库默认）时**完全不校验**；非空时所有 `/api/*` 端点一律校验，失败 401 `UNAUTHORIZED`（`/docs`、`/redoc`、`/openapi.json` 与同源静态页面不受限）。鉴权值只能改 `settings.local.yaml` 并重启，**没有写 API**。前端 token 来源（`VITE_API_TOKEN` 注入或 sessionStorage 当次输入）见 `frontend-contract.md` §8；本接口只校验请求头。
+- 时间一律 ISO 8601 UTC，不带本地时区。
+- `trace_id`：请求可带 `X-Trace-Id`，缺失时服务端生成 8 位十六进制。除 `GET /api/state` 与 `POST /api/correct` 外，所有响应都回带 `trace_id`。
+- 错误响应只有一个形状：`{"success": false, "error": "<CODE>", "message": "...", "trace_id": "..."}`。
+- 请求体严格：出现未声明字段即 400 `INVALID_REQUEST`；`INVALID_REQUEST` 只用于请求字段本身的问题（缺失、未声明、必填为空），不用于业务取值判断。
+- 幂等：`GET` 无副作用；`PUT /api/gateway` 只写本地覆盖层；`cancel` 可重复调用；`save` **不幂等**（允许重名）。
+- `message` 是给人看的一句话，可带具体原因；不得出现内部模块名、级别或堆栈。`result` 是自由对象，前端按语义解读，不依赖固定键。
+- 单位固定：时长秒、波形微秒，不带后缀。
+- `/api/state` 没有 `success` 字段，按 HTTP 200 判定；其余端点成功时 `success=true`。
+- 列表上限：审计默认 50、上限 200；设备与房间全量返回，不保证顺序。
+
+### 状态码映射
+
+| HTTP | 含义 |
+| --- | --- |
+| 200 | 成功；含 `captured=false`、`receiver_stopped=false` 这类业务结果 |
+| 400 | 请求体字段缺失、未声明字段（`INVALID_REQUEST`） |
+| 401 | `UNAUTHORIZED`（前端 token）或 `DEVICE_UNAUTHORIZED`（板子拒绝凭证） |
+| 404 | `NOT_FOUND`（设备、房间、功能或码不存在） |
+| 409 | `CONFLICT`（房间重名、非空房间删除） |
+| 500 | `INTERNAL_ERROR`（不回栈） |
+| 503 | `DEVICE_OFFLINE`（发送/学码时连接失败或超时） |
+
+### 错误码全表（重建版）
+
+| 码 | 状态 | 含义 |
+| --- | --- | --- |
+| `INVALID_REQUEST` | 400 | 请求体字段缺失或出现未声明字段 |
+| `UNAUTHORIZED` | 401 | 前端 token 缺失或不匹配 |
+| `NOT_FOUND` | 404 | 设备 / 房间 / 功能 / 码不存在 |
+| `CONFLICT` | 409 | 房间重名 / 非空房间 |
+| `DEVICE_OFFLINE` | 503 | 设备无响应 / 连接失败 / 超时 |
+| `DEVICE_UNAUTHORIZED` | 401 | 板子在线但鉴权被拒 |
+| `INTERNAL_ERROR` | 500 | 内部错误 |
+
+重建版清退 `POLICY_DENIED`、`FORBIDDEN`、`TIMEOUT`、`MODEL_UNAVAILABLE`、`FALLBACK_EXHAUSTED`、`REDACT_FAILED`、`BUDGET_EXCEEDED`、`P3_NOT_ALLOWED`；**当前代码仍保留这些码**，重建时一次删掉。
+
+**`AGENT_UNREACHABLE` 是客户端展示码，不属于上表 7 个服务端错误码**：服务端从不返回、也不接受请求携带该值；前端仅在请求未到达后端（网络不可达、超时）时本地生成，用于与 `DEVICE_OFFLINE`（后端正常、板子不通）区分。
+
+### 1.1 静态托管（同源）
+
+`frontend.enabled`（默认 `true`）+ `frontend.dist_path`（默认 `frontend/dist`，相对配置目录的上一级解析）控制生产托管：
+
+- dist 内存在 `index.html` 时：`GET /` 与任何未匹配的**非 `/api`** 路径都返回 `index.html`（history 路由回退）；dist 根下的真实文件与 `/assets/*` 按文件返回。
+- **`/api/*` 永远不会落到 `index.html`**：未匹配的 `/api/*` 仍返回 404 JSON 错误信封（`NOT_FOUND`），`/api` 本身同理。
+- `frontend.enabled=false`：不挂静态路由，服务是纯 API。
+- 开启但缺 `dist/index.html`：启动日志打 WARNING，非 API 路径返回 **503 纯文本**「前端未构建…请先 `npm run build`」，`/api` 不受影响（**不是 500**）。
+- 生产**不使用 Vite dev server**：页面与 API 同源同端口，构建产物由后端直接提供；静态页面与 `/docs` 不受 token 约束。
+
+## 2. 端点清单（21 个）
+
+### 2.1 健康检查
+
+**`GET /api/health`** — 存活探针，恒 200；同样受 Bearer 鉴权约束。
+成功：`{success:true,status:"ok",schema_version:1,trace_id}`。无请求参数、无副作用；`schema_version` 与 `SCHEMA_VERSION` 同值。
+
+### 2.2 状态
+
+**`GET /api/state`** — 全部设备状态与传感器占位。
+成功：`{devices:[{id,name,state,state_source,updated_at}], sensors:{available,temperature,humidity,presence}}`。
+`state_source` 只有 `unknown` / `confirmed`；传感器本期不接入：`available=false`，三项读数恒 `null`（**不是 0**）。无筛选参数、无 `trace_id`。
+
+### 2.3 设备（6）
+
+**`GET /api/devices?room=`** — 设备列表。`room` 可选。
+成功：`{devices:[...], trace_id}`；设备字段 `id,name,room,adapter,notes,extra,functions[]`；功能字段只有 `id,name`。
+
+**`POST /api/devices`** — 新增设备。
+请求：`{name,room,notes?,learn_draft?}`；**无 id、无 adapter**，服务端生成 `dev_*`，`adapter` 恒 `ir`。
+- `learn_draft=true`：创建空壳设备（`extra.learn_draft=true`，存在 `devices.extra` 里，不新增列），学码会话在它上面开；后续任一步失败即撤壳。**`save` 成功后服务端清掉该标记**，设备转为普通设备。
+- 成功：`DeviceDetail`，带 `trace_id`。错误：400 未声明字段；404 房间不存在。
+
+**`GET /api/devices/{id}`** — 详情，含功能列表。错误：404。
+
+**`PATCH /api/devices/{id}`** — 只接受 `name` / `room` / `notes`；其它字段一律 400。
+错误：400 未声明字段；404 设备或房间不存在。
+
+**`DELETE /api/devices/{id}`** — 级联删功能与码。错误：404。设备全部可删。
+
+**`DELETE /api/devices/{id}/functions/{function_id}`** — 删除学码功能，级联删码。
+成功：`{success,deleted:{function_id,codes},trace_id}`，`deleted.codes` 为被级联删除的码条数；错误：404。
+
+### 2.4 房间（4）
+
+**`GET /api/rooms`** — `{rooms:[{name,display_name,sort_order,device_count}], trace_id}`。
+**`POST /api/rooms`** — `{name,display_name,sort_order?}`；409 重名。
+**`PATCH /api/rooms/{name}`** — 改 `name/display_name/sort_order`；重命名同步设备 `room`；404 / 409。
+**`DELETE /api/rooms/{name}`** — 空房间才可删；409 / 404。
+
+房间 `name` 的字符规则由前端派生保证（`[a-z0-9_]`、唯一，见 `frontend-contract.md` §2）；服务端只校验必填与重名 409，接口本身不限制字符集。
+
+### 2.5 学码（4）
+
+**`POST /api/learn/start`** — `{device_id}`。**只开会话，不创建资源**；设备必须已存在（草稿由 `POST /api/devices` 带 `learn_draft=true` 创建）。成功 `{success,device_id,message,trace_id}`；错误 404 设备不存在、503 网关开不起接收态。
+
+**`GET /api/learn/capture?device_id=`** — 有活动会话时**除鉴权失败外恒 200**。成功 `{captured,device_id,raw_code,message,reason,trace_id}`；`captured=false` 不是错误；`reason` 三值 `no_signal` / `malformed` / `gateway_unreachable`。轮询期间网关连不上时**仍是 200**，用 `reason=gateway_unreachable` 表达，不升级为错误。唯一例外是板子在线但拒绝凭证 → 401 `DEVICE_UNAUTHORIZED`。**没有活动会话（未 `start`、已 `save` / `cancel` 或已被 TTL 回收）→ 404 `NOT_FOUND`**。
+
+**`POST /api/learn/save`** — `{device_id,name,raw_code}`。成功 `{function_id,name,receiver_stopped,receiver_error,trace_id}`；先落库再关接收，关失败不回滚码。错误 400 空波形 / 404 / 500。
+
+**`POST /api/learn/cancel`** — `{device_id}`，幂等。成功 `{success,device_id,message,draft_discarded,trace_id}`；`draft_discarded=true` 表示空壳已被删除。
+
+### 2.6 控制（1）
+
+**`POST /api/control`** — `{function_id}`。
+只接受 `function_id`；设备由功能归属推出，**没有 `device_id`、`action`、`params`**，也没有参数校验。
+成功：`{success,result,trace_id}`，其中 `result` 固定为 `{function_id,device_id,state,message}`（内部键冻结；`state` 恒 `unknown`，`message` 为「信号已发出」）。错误：400 字段缺失/未声明；404 功能不存在或该功能还没有码；503 发送失败。
+
+### 2.7 校正（1）
+
+**`POST /api/correct`** — `{device_id,state,reason?}`。
+`state` 是**非空自由字符串**（建议 `on` / `off` / `unknown`），不做枚举校验；空串按字段缺失 400，长度上限 **64**（与 `device_states.state` 的 CHECK 一致）。`reason` 可省略，上限 **128**。
+成功：`{success,device_id,state,state_source}`，`state_source` 恒 `confirmed`，无 `trace_id`。错误：404 设备不存在。
+
+### 2.8 网关（2）
+
+**`GET /api/gateway?refresh=`** — 只读探测，无副作用；mock 模式也返回。
+成功：`{success,mode,base_url,reachable,checked_at,latency_ms,error,last_success_at,simulated,pending_restart,trace_id}`。
+`base_url` 表示**当前配置值**：`PUT` 之后即使尚未重启，也返回已保存的新地址，并用 `pending_restart=true` 标明「已保存、未生效」；重启后该值自然变为有效地址且 `pending_restart=false`。**`pending_restart=true` 时 `reachable` / `latency_ms` / `error` 仍是对旧地址的探测结果**（探测链路只在重启后切换），不能用来判断新地址是否可用。mock 模式默认 `base_url` 为空串、`simulated=true`。探测结果缓存 **15 秒**；`refresh=true` 绕过缓存。探测只影响展示，**不是控制前置条件**。
+
+**`PUT /api/gateway`** — `{base_url}`，写 `settings.local.yaml` 并落 `config_audit`。
+`base_url` 必须是 **`http` / `https` 且 host 非空**的地址；非法（含空串、`ftp://`、无 host）一律 400 `INVALID_REQUEST`。
+成功：`{success,mode,base_url,restart_required,message,trace_id}`。鉴权值没有写 API。
+
+### 2.9 审计（1）
+
+**`GET /api/audit?limit=&result=&device_id=`** — 按写入倒序。
+成功：`{records:[{created_at,action,device_id,result,reason,trace_id}], trace_id}`。
+`limit` 1–200（默认 50）；`result` 三值 `success` / `failed` / `all`（`all` 或缺省表示不筛选）；`device_id` 按 `audit_logs.device_id` **精确匹配**（空值记录不参与）。非法 → 400。
+
+## 3. 学码契约
+
+- 草稿设备由 `POST /api/devices` 的 `learn_draft=true` 创建；`start` 只开会话。这样「创建失败」与「开会话失败」两种失败各归各的端点。
+- `captured=false` 是 200 的正常结果（用户还没按键）；唯一例外是 401 鉴权失败。
+- `reason` 三值：`no_signal` / `malformed` / `gateway_unreachable`，只解释「为什么没捕获」。
+- `save` 原子：校验与落库通过后才关接收；关失败仍 200，用 `receiver_stopped=false` + `receiver_error` 告知。
+- `capture` 的“除鉴权失败外恒 200”只约束业务结果，不承诺网络与 5xx 永不发生：出现网络中断、超时或 5xx 时，前端按 `frontend-contract.md` 的学码异常规则停止轮询、尽力 `cancel` 并展示人话，服务端不新增语义。
+- `cancel` 必须返回结构化 `draft_discarded`，调用方不得靠 message 判断。
+- `save` 成功时服务端**清除 `extra.learn_draft` 标记**，草稿设备转为普通设备；`save` 只落 learned 功能与码，不改设备其他字段。
+- 撤壳双条件：仅当 `devices.extra.learn_draft=true` **且** 该设备在 `device_functions` / `ir_codes` / `device_states` 三张子表中全无记录时才删除设备；任一有数据即保留。
+- 空闲 TTL 到期由服务端自生成 `trace_id`（原请求链已断），审计固定 `who=system`、`action=learn.idle_timeout`，与用户主动 `cancel` 区分。
+
+## 4. 控制契约
+
+- `function_id` 必填且唯一寻址；设备由功能归属推出。出现 `device_id`、`action`、`params` 一律按未声明字段 400。
+- 调用只做一件事：取该功能最新一条码并经 `ir_proxy_tx` 回放；没有参数、没有能力校验、没有越界判断。
+- 功能不存在 → 404；功能存在但没有任何码 → 404（文案说明「该功能还没有可用码」）。
+- 回放成功只代表「信号已发出」，状态写 `unknown`；连接失败 → 503 `DEVICE_OFFLINE`；探测结果**不参与**控制前置判断。
+- 成功与失败都写 `audit_logs`（`who=user`），没有策略拒绝分支。
+
+## 5. 演进规则
+
+- 只做加法：新增端点、可选字段、枚举值都不升版本；破坏性变更必须升版本并保留旧端点一个周期。
+- 字段命名冻结：用户侧 `message`、设备侧 `id`；错误码只增不改语义，新增码同时进本表与前端人话表。
+- 契约文档是唯一来源：代码与本文冲突时，先改文档再改代码。

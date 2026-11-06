@@ -1,0 +1,22 @@
+# 运行期配置权威文件（进版本库）。
+# 密钥与本地覆盖只写 config/settings.local.yaml，读时按 *.local.yaml > *.yaml 覆盖。
+gateway:
+  mode: mock          # mock | real；改后需重启
+  ir:
+    base_url: ""
+    username: ""
+    password: ""
+  probe_timeout_seconds: 3
+
+state:
+  retention_days: 90
+
+audit:
+  retention_days: 365
+
+api:
+  token: ""           # 空串 = 完全不校验；非空需 Bearer
+
+frontend:
+  enabled: true       # true = 同源托管 dist；false = 纯 API
+  dist_path: "frontend/dist"   # 相对路径按配置目录的上一级（仓库根）解析

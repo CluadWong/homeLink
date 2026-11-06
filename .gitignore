@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+data/*.db
+data/*.db-journal
+data/backup/
+config/*.local.yaml
+jj_butler.egg-info/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
