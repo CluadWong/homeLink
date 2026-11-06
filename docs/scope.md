@@ -30,7 +30,7 @@
 | 场景、定时、规则引擎、意图理解与多轮对话 | 已下架；自动化与对话由上层智能管家实现，本服务只提供单次控制 |
 | 温湿度等传感器 | **本期不接入**：`/api/state` 明确返回 `available=false` 与 `null`，界面显示「未接入」 |
 | 用户体系与鉴权 | 单用户本地部署，暂不需要 |
-| 正式前端 | 将用 Vue 重写，契约见 `frontend-contract.md`；Streamlit 随时可弃 |
+| 正式前端 | 已完成：Vue 前端在 `frontend/` 实现，`frontend/dist` 构建通过并由后端同源托管，契约见 `frontend-contract.md`；Streamlit 保留但不参与启动 |
 
 ## 成功判据
 

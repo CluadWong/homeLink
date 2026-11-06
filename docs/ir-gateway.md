@@ -63,7 +63,7 @@ cancel / 600s 超时 ──▶ 撤空壳 → turn_off
 - 撤壳双条件：仅当草稿标记仍在**且** `device_functions` / `ir_codes` / `device_states` 对该设备全为空时才删设备；`save` 成功后标记被清掉，不会再撤壳。
 - 空闲 TTL 到期由服务端自生成 `trace_id`（原请求已断），审计 `who=system`、`action=learn.idle_timeout`；用户主动取消是 `learn.cancel`，两者不得混淆。
 
-- 独立脚本 `scripts/ir_learn.py` 按 **0.25s** 轮询；产品路径由客户端 1s 调 `capture`，服务端即时读传感器。
+- 产品路径由客户端 1s 调 `capture`，服务端即时读传感器。
 - 开学习模式会清空上次波形，`start` 后读到的必然是本次按键。
 - `hardware/ir-codes/<device_id>.json` 只是历史归档；与库冲突时**以数据库为准**，文件不得反向覆盖库。
 - `start` 不创建设备：草稿由 `POST /api/devices` 创建，`start` 只对已有设备开会话；捕获的 `raw_code` 原样存储，保存前只校验非空、可解析。

@@ -16,8 +16,8 @@
 | 状态只追加与用户校正 | ✅ | `test_state.py`、`test_correct.py` |
 | 网关 mock / real、地址与探测 | ✅ mock / 🟠 real | mock 全链路单测；real 探测已真机确认可达（HTTP 200），回放与学码未执行 |
 | 审计 | ✅ | `test_audit.py`、`test_control.py`、`test_learn.py` |
-| Streamlit 六页（过渡前端） | 🟡 | `interface/clients/streamlit/` 六页代码已落盘（最后写入 19:54），从未启动、无自动化测试 |
-| Vue 正式前端（`frontend/`） | 🟡 | 已构建 `frontend/dist` 并由后端同源托管；curl 确认页面 200，但无 UI 自动化与浏览器功能验证 |
+| Streamlit 六页（过渡前端） | 🟡 已冻结，不参与验收 | `interface/clients/streamlit/` 六页代码保留、不启动、不做 UI 测试；正式前端为 Vue，Streamlit 已不是启动入口 |
+| Vue 正式前端（`frontend/`） | 🟡 | 已构建 `frontend/dist` 并由后端同源托管；curl 确认页面 200；无 UI 自动化，2026-11-07 做过一次手工浏览器走查 6 页 |
 | 判据① mock 全流程跑通 | ✅ | 190 项单测覆盖「建设备→学码→调用→校正→审计」 |
 | 判据① real 切换零代码 | 🟠 | 已确认 real 探测链路可用（只读）；控制与学码仍从未真机执行 |
 | 判据② 重启状态不丢 | ✅ | 状态不入内存，`GET /api/state` 直接读 `device_states` 最新行；无跨进程冒烟 |
@@ -56,7 +56,7 @@
 | 状态语义 `unknown` / `confirmed` | ✅ | `test_state.py`、`test_correct.py` |
 | 学码状态机与 600s 空闲 TTL | ✅ | `test_learn.py`（到期清会话、审计、撤壳、区分 cancel） |
 | 保留期清理 | ✅ | `test_retention.py`（90/365 天，失败不阻断启动） |
-| 一次性导入脚本 | ❌ | 文档要求「重建时另写」，未交付 |
+| 一次性导入脚本 | 不适用 | 重建版不带旧数据（README 已声明「不带旧代码、旧数据、旧迁移链」）；该脚本仅在未来确需沿用旧库时才写 |
 | 配置权威（`settings.local.yaml` 覆盖） | ✅ | `test_config_service.py` |
 | 执行顺序红线（播种早于设备写入） | ✅ | 装配实现与测试均体现 |
 
@@ -89,7 +89,7 @@
 | 客户端 10s 判失败 | 🟡 | Streamlit `learn.py` 有逻辑，从未运行验证 |
 | 单向语义（回放后一律 `unknown`） | ✅ 后端 / 🟡 前端 | 后端单测；前端硬约束未运行验证 |
 | 探测 15s 缓存与 `refresh` | ✅ | `test_gateway.py`、`test_gateway_api.py` |
-| 独立脚本 `scripts/ir_learn.py`（0.25s 轮询） | ❌ | 不存在 |
+| 独立脚本 `scripts/ir_learn.py`（0.25s 轮询） | 不交付 | 调试辅助、非产品路径；产品链路是客户端 1s 轮询 `capture`，此脚本明确不交付（不是待补，而是决策不做） |
 
 **真机只读确认结果（2026-11-06）**：目标 `http://192.168.10.3`，Basic 凭据为用户名/密码双非空。
 
@@ -105,8 +105,8 @@
 
 | 条目 | 状态 | 证据 / 缺口 |
 | --- | --- | --- |
-| Vue 3 + Vite 技术栈与六页结构 | 🟡 | `frontend/` 六页已实现并构建 `dist`，由后端同源托管（curl 页面 200）；无 UI 自动化与浏览器功能验证 |
-| 过渡 Streamlit 六页（设备/学码/调用/状态/校正/审计） | 🟡 | 代码齐全，从未启动、无 UI 测试 |
+| Vue 3 + Vite 技术栈与六页结构 | 🟡 | `frontend/` 六页已实现并构建 `dist`，由后端同源托管（curl 页面 200）；无 UI 自动化，2026-11-07 做过一次手工浏览器走查 6 页 |
+| 过渡 Streamlit 六页（设备/学码/调用/状态/校正/审计） | 🟡 已冻结，不参与验收 | 代码保留、不启动、不做 UI 测试；正式前端为 Vue，Streamlit 已不是启动入口（与 docs/README.md 一致） |
 | 非标准 `state` 原样显示、超 12 字符截断 | ✅ 代码 / 🟡 运行 | 本轮修改 `widgets.state_text` |
 | 成功只说「已发送」 | 🟡 | `pages/call.py` 文案已按契约，未运行验证 |
 | 鉴权头、错误人话、trace 展开 | 🟡 | `http_client.py` / `widgets.py` 有单测级逻辑，无 UI 验证 |

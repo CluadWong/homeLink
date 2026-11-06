@@ -11,6 +11,7 @@ import LoadingBlock from '../components/LoadingBlock.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StateBadge from '../components/StateBadge.vue'
 import { refreshState, useStatusSummary } from '../composables/useStatusSummary'
+import { stateText } from '../utils/format'
 
 const { snapshot } = useStatusSummary()
 const loading = ref(true)
@@ -65,7 +66,7 @@ async function submit(): Promise<void> {
       state: nextState,
       reason: reason.value.trim() || undefined,
     })
-    lastResult.value = { deviceName: device.name, state: result.state }
+    lastResult.value = { deviceName: device.name, state: stateText(result.state, 'confirmed') }
     showToast({ message: '已记录校正', duration: 1500 })
     await refreshState()
   } catch (error) {

@@ -1,6 +1,6 @@
 # JJ-Butler（从 0 重建版）
 
-红外单向设备管家（控制器版）：FastAPI + SQLite 后端，配一套只作过渡的 Streamlit 前端。
+红外单向设备管家（控制器版）：FastAPI + SQLite 后端，配 Vue 3 + Vite 正式前端（`frontend/`，构建产物由后端同源托管）；`interface/clients/streamlit/` 是保留的旧过渡代码，已不是启动入口。
 
 > **这是从 0 重建的版本，与旧 `JJ-Butler` 代码库无关**：不带旧代码、旧数据、旧迁移链；schema 只有 `user_version = 1`。
 
