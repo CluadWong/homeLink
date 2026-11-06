@@ -16,7 +16,7 @@ uvicorn jj_butler.interface.api.app:app --host 0.0.0.0 --port 8000
 ```
 
 - 默认 `mock` 模式：不连真实板子、不发红外。
-- 前端（Vue）已构建在 `frontend/dist`，启动后与 `/api` **同源**：浏览器直接打开 `http://127.0.0.1:8000/`。重新构建：`cd frontend && npm install && npm run build`；生产不使用 Vite dev server。
+- 前端（Vue）构建产物为 `frontend/dist`，不入 git：独立运行前需执行一次 `cd frontend && npm install && npm run build` 生成，或从已构建环境拷贝 dist 目录。构建后与 `/api` **同源**：浏览器直接打开 `http://127.0.0.1:8000/`。生产不使用 Vite dev server。
 - 一键启动：`python scripts/start.py`（只拉起 uvicorn，日志写 `logs/backend.log`，Ctrl+C 不留孤儿进程）。
 - 离开本仓库运行时，用环境变量 `JJ_BUTLER_CONFIG_DIR`（配置目录）与 `JJ_BUTLER_DB_PATH`（SQLite 文件）指定路径。
 

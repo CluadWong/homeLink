@@ -133,5 +133,5 @@
 - 配置：`config/settings.yaml` 必须存在（缺失时打印文件路径与最小示例，非 0 退出）；`devices.yaml` 提供房间种子；`settings.local.yaml` 放密钥。
 - 数据：默认写仓库根 `data/jj_butler.db`；`Database.initialize()` 会递归创建父目录，目标目录不必预先存在。
 - 路径风险：默认路径由 `Path(__file__).parents[4]` 推出，只在仓库内 / editable 安装成立；普通 wheel 安装会指向错误目录，**必须**设置 `JJ_BUTLER_CONFIG_DIR` 与 `JJ_BUTLER_DB_PATH`。
-- 前端：`frontend/dist` 随仓库或单独拷贝即可，`frontend.enabled=true` 时由后端直接提供；**重新构建**才需要 Node（`cd frontend && npm install && npm run build`），生产不使用 Vite dev server。
-- 结论：拷出 `config/` + `frontend/dist` + 装包 + 设两个环境变量即可独立运行；不依赖仓库内其它脚本或文件。必需配置缺失时现在会给「文件路径 + 最小示例 + 文档指针」并以非 0 退出，不必再读堆栈猜。
+- 前端：`frontend/dist` 为构建产物、不入 git；独立运行前需执行一次 `cd frontend && npm install && npm run build` 生成，或从已构建环境拷贝 dist 目录。`frontend.enabled=true` 时由后端同源提供，生产不使用 Vite dev server。
+- 结论：拷出 `config/` + 构建产物 `frontend/dist`（dist 不入 git，需先构建或从已构建环境拷贝）+ 装包 + 设两个环境变量即可独立运行；不依赖仓库内其它脚本或文件。必需配置缺失时现在会给「文件路径 + 最小示例 + 文档指针」并以非 0 退出，不必再读堆栈猜。
