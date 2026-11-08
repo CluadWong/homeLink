@@ -1,4 +1,4 @@
-"""学码页：先建设备草稿，再开会话；每秒轮询捕获，保存后给「去调用」出口。"""
+"""学码页：选择已有设备，先定功能名，再开会话；每秒轮询捕获，保存后给「去调用」出口。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import streamlit as st
 from jj_butler.interface.clients.http_client import AgentClient, ApiError
 from jj_butler.interface.clients.streamlit import errors, widgets
 
-DRAFT_KEY = "learn_draft_device"
-DRAFT_NAME_KEY = "learn_draft_name"
+DEVICE_NAME_KEY = "learn_device_name"
+FUNCTION_NAME_KEY = "learn_function_name"
 ACTIVE_KEY = "learn_active_device"
 STARTED_KEY = "learn_started_at"
 CAPTURED_KEY = "learn_captured"
@@ -67,17 +67,19 @@ def _render_saved(saved: tuple[Any, ...]) -> None:
 
 
 def _render_create_form(client: AgentClient) -> None:
-    st.markdown("**学一个按键 = 先建一台草稿设备，再录一段码。**")
-    st.caption("保存成功后草稿转为普通设备；取消时后端只会撤掉还没有任何数据的空壳。")
+    st.markdown("**学一个按键 = 选择已有设备，再录一段码。**")
+    st.caption("设备在「设备」页维护；这里只给选中的设备新增一个学码功能。")
 
     try:
+        devices_payload = client.devices()
         rooms_payload = client.rooms()
     except ApiError as exc:
         widgets.render_error(exc)
         return
+    devices = list(devices_payload.get("devices") or [])
     rooms = list(rooms_payload.get("rooms") or [])
-    if not rooms:
-        st.info("还没有房间。先去「设备」页新建房间，再回来学码。")
+    if not devices:
+        st.info("还没有设备。先去「设备」页添加设备，再回来给它学功能。")
         if st.button("去设备页", key="learn_goto_devices", type="primary"):
             widgets.goto("设备")
         return
@@ -85,17 +87,23 @@ def _render_create_form(client: AgentClient) -> None:
     room_map = {
         str(item.get("name")): str(item.get("display_name") or item.get("name")) for item in rooms
     }
-    with st.form("learn_create_draft"):
-        name = st.text_input("设备名称", placeholder="卧室空调", key="learn_device_name")
-        room = st.selectbox(
-            "房间",
-            [str(item.get("name")) for item in rooms],
-            format_func=lambda value: room_map.get(value, value),
-            key="learn_device_room",
+    device_ids = [str(item.get("id")) for item in devices]
+    device_map = {
+        str(item.get("id")): (
+            f"{item.get('name')} · {room_map.get(str(item.get('room')), item.get('room'))}"
         )
-        notes = st.text_input("备注（可选）", key="learn_device_notes")
+        for item in devices
+    }
+    with st.form("learn_start_form"):
+        device_id = st.selectbox(
+            "设备",
+            device_ids,
+            format_func=lambda value: device_map.get(value, value),
+            key="learn_target_device",
+        )
+        name = st.text_input("功能名", placeholder="开机", maxlength=40, key="learn_function_name")
         submitted = st.form_submit_button(
-            "建立草稿并开始接收",
+            "开始学码",
             type="primary",
             use_container_width=True,
         )
@@ -104,29 +112,21 @@ def _render_create_form(client: AgentClient) -> None:
 
         text = name.strip()
         if not text:
-            st.warning("设备名称不能为空。")
+            st.warning("功能名不能为空，例如「开机」。")
+            return
+        if len(text) > 40:
+            st.warning("功能名最多 40 个字符。")
             return
 
-        try:
-            created = client.create_device(text, room, notes=notes.strip(), learn_draft=True)
-        except ApiError as exc:
-            widgets.render_error(exc)
-            return
-
-        device_id = str(created.get("id") or "")
-        st.session_state[DRAFT_KEY] = device_id
-        st.session_state[DRAFT_NAME_KEY] = text
         try:
             client.learn_start(device_id)
         except ApiError as exc:
-            # 开会话失败：按契约撤掉草稿空壳，不留半成品。
-            _safe_cancel(client, device_id)
-            _clear_session()
             widgets.render_error(exc)
-            st.caption("草稿设备已撤回，可以修正后重新开始。")
             return
 
         st.session_state[ACTIVE_KEY] = device_id
+        st.session_state[DEVICE_NAME_KEY] = device_map.get(device_id, device_id)
+        st.session_state[FUNCTION_NAME_KEY] = text
         st.session_state[STARTED_KEY] = (device_id, time.monotonic())
         st.session_state.pop(POLL_ERROR_KEY, None)
         widgets.flash("success", "已打开接收 —— 请对准接收头按下遥控器。")
@@ -134,8 +134,9 @@ def _render_create_form(client: AgentClient) -> None:
 
 
 def _render_active(client: AgentClient, device_id: str) -> None:
-    name = str(st.session_state.get(DRAFT_NAME_KEY) or "草稿设备")
-    st.markdown(f"**正在学码：{name}**")
+    name = str(st.session_state.get(DEVICE_NAME_KEY) or device_id)
+    function_name = str(st.session_state.get(FUNCTION_NAME_KEY) or "未命名功能")
+    st.markdown(f"**正在学码：{name} · {function_name}**")
     st.caption("请对准接收头按下遥控器（距离 1–3 米）。")
 
     if st.session_state.get(SESSION_ENDED_KEY):
@@ -182,7 +183,7 @@ def _render_capture_poll(client: AgentClient, device_id: str) -> None:
     st.info(f"还在等信号…{waited}　请再按一次遥控器。")
 
     if reason == "malformed":
-        st.warning("收到了信号，但这次没认出来 —— 靠近一点（1–3 米）再按一次。")
+        st.warning(str(captured.get("message") or "收到了信号，但这次没认出来 —— 请再按一次。"))
     elif reason == "gateway_unreachable":
         st.warning("暂时连不上网关 —— 先去「状态」页确认网关，再继续按键。")
     elif reason == "no_signal" and elapsed is not None and elapsed >= TIMEOUT_SECONDS:
@@ -235,7 +236,7 @@ def _render_poll_error(client: AgentClient, device_id: str) -> None:
 def _render_session_ended(client: AgentClient, device_id: str) -> None:
     message = str(st.session_state.get(SESSION_ENDED_KEY) or "学码会话已结束。")
     st.error(message)
-    st.caption("本次没有保存新功能。可以重新开始接收，或取消并清理草稿设备。")
+    st.caption("本次没有保存新功能。可以重新开始接收，或取消学码。")
     retry_col, reset_col = st.columns(2)
     if retry_col.button(
         "重新开始接收",
@@ -260,7 +261,7 @@ def _restart_session(client: AgentClient, device_id: str) -> None:
     except ApiError as exc:
         if exc.code == "NOT_FOUND":
             _clear_session()
-            widgets.flash("error", "草稿设备已不存在，请重新建立学码草稿。", exc.code)
+            widgets.flash("error", "设备已不存在，请回设备页确认后重来。", exc.code)
         else:
             widgets.flash("error", errors.error_text(exc), exc.code)
         st.rerun()
@@ -276,20 +277,18 @@ def _restart_session(client: AgentClient, device_id: str) -> None:
 def _render_save_form(client: AgentClient, captured: dict[str, Any]) -> None:
     device_id = str(captured.get("device_id"))
     raw_code = [int(value) for value in (captured.get("raw_code") or [])]
-    st.success(f"已捕获 {len(raw_code)} 段波形，请命名保存。")
+    text = str(st.session_state.get(FUNCTION_NAME_KEY) or "").strip()
+    st.success(f"已捕获 {len(raw_code)} 段波形，将保存为「{text or '未命名'}」。")
+    st.caption("功能名在开始学码前已确定；如需改名，请取消后重新开始。")
 
-    with st.form("learn_save_form"):
-        name = st.text_input("给这个键起个名字", placeholder="开机", key="learn_function_name")
-        submitted = st.form_submit_button(
-            "保存为功能",
-            type="primary",
-            use_container_width=True,
-        )
-        if not submitted:
-            return
-        text = name.strip()
+    if st.button(
+        "保存功能",
+        key="learn_save_captured",
+        type="primary",
+        use_container_width=True,
+    ):
         if not text:
-            st.warning("名字不能为空，不然以后分不清这个键是做什么的。")
+            st.warning("功能名不能为空，请取消后重新开始。")
             return
         if not raw_code:
             st.warning("这次没有收到有效信号，没法保存，请重新学一次。")
@@ -310,7 +309,7 @@ def _render_save_form(client: AgentClient, captured: dict[str, Any]) -> None:
                 "码已保存，但接收态没有关闭："
                 f"{result.get('receiver_error') or '网关没有确认关闭'}。功能与码都已落库，可直接调用。"
             )
-        device_name = str(st.session_state.get(DRAFT_NAME_KEY) or device_id)
+        device_name = str(st.session_state.get(DEVICE_NAME_KEY) or device_id)
         _clear_session()
         st.session_state[SAVED_KEY] = (device_id, text, device_name)
         if warning:
@@ -334,7 +333,7 @@ def _elapsed_seconds(device_id: str) -> int | None:
 
 
 def _safe_cancel(client: AgentClient, device_id: str) -> None:
-    # 撤壳失败不阻断当前流程；服务端空闲 TTL 会兜底清理。
+    # 取消失败不阻断当前流程；服务端空闲 TTL 会兜底停掉接收态。
     with contextlib.suppress(ApiError):
         client.learn_cancel(device_id)
 
@@ -364,8 +363,8 @@ def cancel_active_session(client: AgentClient) -> bool:
 
 def _clear_session() -> None:
     for key in (
-        DRAFT_KEY,
-        DRAFT_NAME_KEY,
+        DEVICE_NAME_KEY,
+        FUNCTION_NAME_KEY,
         ACTIVE_KEY,
         STARTED_KEY,
         CAPTURED_KEY,

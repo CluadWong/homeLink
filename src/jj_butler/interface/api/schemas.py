@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _StrictBody(BaseModel):
@@ -45,7 +45,6 @@ class DeviceCreateRequest(_StrictBody):
     name: str
     room: str
     notes: str | None = None
-    learn_draft: StrictBool = False
 
     @field_validator("name", "room")
     @classmethod
@@ -86,7 +85,8 @@ class LearnStartRequest(_StrictBody):
 
 class LearnSaveRequest(_StrictBody):
     device_id: str
-    name: str
+    # 功能名在开始学码前就由用户确定；40 字符上限与前端输入框一致。
+    name: str = Field(min_length=1, max_length=40)
     raw_code: list[int] = Field(min_length=1)
 
     @field_validator("device_id", "name")

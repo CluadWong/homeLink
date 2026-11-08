@@ -30,11 +30,12 @@ def test_create_device_rejects_adapter_field(client):
     assert body["trace_id"]
 
 
-def test_create_device_learn_draft_flag(client):
-    body = client.post(
-        "/api/devices", json={"name": "草稿灯", "room": "bedroom", "learn_draft": True}
-    ).json()
-    assert body["extra"] == {"learn_draft": True}
+def test_create_device_rejects_learn_draft_field(client):
+    response = client.post(
+        "/api/devices", json={"name": "灯", "room": "bedroom", "learn_draft": True}
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "INVALID_REQUEST"
 
 
 def test_create_device_unknown_room(client):

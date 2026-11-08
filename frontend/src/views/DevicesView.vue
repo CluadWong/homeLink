@@ -340,7 +340,7 @@ onMounted(() => {
             </header>
 
             <div v-if="device.functions.length === 0" class="inline-empty">
-              还没有学码功能。<RouterLink to="/learn">去学码</RouterLink>
+              还没有学码功能。<RouterLink :to="{ path: '/learn', query: { device_id: device.id } }">去学码</RouterLink>
             </div>
 
             <ul v-else class="function-list">

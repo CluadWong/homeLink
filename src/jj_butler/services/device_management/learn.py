@@ -2,19 +2,17 @@
 
 并发模型：所有会话状态只由 ``threading.RLock`` 保护；TTL 用每会话一个
 ``threading.Timer``，到期回调在锁内比对「设备 + 代次」，已被 save/cancel/新会话
-取代的回调直接退出，避免误停接收或误删草稿。
+取代的回调直接退出，避免误停接收。
 """
 
 from __future__ import annotations
 
-import json
 import secrets
 import threading
 from dataclasses import dataclass, field
 from typing import Any
 
 from jj_butler.brain.audit import AuditStore
-from jj_butler.core.database import Database
 from jj_butler.core.errors import AppError, ErrorCode
 from jj_butler.gateway.base import GatewayError, IRGateway
 from jj_butler.gateway.waveform import WaveformError, decode_waveform
@@ -27,7 +25,6 @@ REASON_MALFORMED = "malformed"
 REASON_GATEWAY_UNREACHABLE = "gateway_unreachable"
 
 _MISSING_SESSION = "学码会话不存在或已结束"
-_DRAFT_TABLES = ("device_functions", "ir_codes", "device_states")
 
 
 @dataclass
@@ -40,14 +37,12 @@ class _Session:
 class LearnService:
     def __init__(
         self,
-        db: Database,
         devices: DeviceStore,
         gateway: IRGateway,
         audit: AuditStore,
         *,
         idle_ttl_seconds: float = DEFAULT_IDLE_TTL_SECONDS,
     ) -> None:
-        self._db = db
         self._devices = devices
         self._gateway = gateway
         self._audit = audit
@@ -113,8 +108,13 @@ class LearnService:
             return _capture_result(device_id, captured=False, reason=REASON_NO_SIGNAL)
         try:
             raw_code = decode_waveform(text)
-        except WaveformError:
-            return _capture_result(device_id, captured=False, reason=REASON_MALFORMED)
+        except WaveformError as exc:
+            return _capture_result(
+                device_id,
+                captured=False,
+                reason=REASON_MALFORMED,
+                message=f"收到的波形无法解析（{exc.label}）：{exc}",
+            )
         return _capture_result(device_id, captured=True, raw_code=raw_code)
 
     def save(
@@ -165,24 +165,18 @@ class LearnService:
         except GatewayError as exc:
             receiver_error = exc.message
 
-        draft_discarded = self._discard_draft_shell(device_id)
-
         self._audit.write(
             who="user",
             action="learn.cancel",
             device_id=device_id,
-            context={"device_id": device_id, "draft_discarded": draft_discarded},
+            context={"device_id": device_id},
             reason=receiver_error,
             result="success",
             trace_id=trace_id,
         )
-        message = "已取消学码"
-        if draft_discarded:
-            message = "已取消学码，草稿设备已删除"
         return {
             "device_id": device_id,
-            "draft_discarded": draft_discarded,
-            "message": message,
+            "message": "已取消学码",
         }
 
     # ------------------------------------------------------------ TTL 内部
@@ -220,8 +214,6 @@ class LearnService:
         except GatewayError as exc:
             receiver_error = exc.message
 
-        draft_discarded = self._discard_draft_shell(device_id)
-
         reason = "空闲超时"
         if receiver_error:
             reason = f"{reason}；关接收失败：{receiver_error}"
@@ -229,30 +221,11 @@ class LearnService:
             who="system",
             action="learn.idle_timeout",
             device_id=device_id,
-            context={"device_id": device_id, "draft_discarded": draft_discarded},
+            context={"device_id": device_id},
             reason=reason,
             result="success",
             trace_id=secrets.token_hex(4),  # 系统收尾无请求 trace
         )
-
-    def _discard_draft_shell(self, device_id: str) -> bool:
-        """仅当「草稿标记 + 三张子表全空」时撤壳；否则保留设备。"""
-
-        with self._db.transaction() as conn:
-            row = conn.execute("SELECT extra FROM devices WHERE id = ?", (device_id,)).fetchone()
-            if row is None:
-                return False
-            extra = json.loads(row["extra"])
-            if not isinstance(extra, dict) or not extra.get("learn_draft"):
-                return False
-            for table in _DRAFT_TABLES:
-                count = conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE device_id = ?", (device_id,)
-                ).fetchone()[0]
-                if count:
-                    return False
-            conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
-            return True
 
 
 def _capture_result(
@@ -261,6 +234,7 @@ def _capture_result(
     captured: bool,
     raw_code: list[int] | None = None,
     reason: str | None = None,
+    message: str | None = None,
 ) -> dict[str, Any]:
     messages = {
         REASON_NO_SIGNAL: "还没有收到信号，请在设备前按键",
@@ -273,7 +247,7 @@ def _capture_result(
         "device_id": device_id,
         "raw_code": raw_code,
         "reason": reason,
-        "message": messages[reason],
+        "message": message or messages[reason],
     }
 
 

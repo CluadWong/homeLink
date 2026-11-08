@@ -38,7 +38,9 @@ class GatewayProbe:
             elapsed_ms = int((self._clock() - started) * 1000)
 
             checked_at = utc_now_iso()
-            if outcome.reachable:
+            # reachable 只表示「能连上」；401/403 也是 true。只有真正拿到有效响应
+            # （error=None）才刷新 last_success_at，鉴权被拒/5xx/超时都不算成功。
+            if outcome.reachable and outcome.error is None:
                 self._last_success_at = checked_at
             self._cached = {
                 "mode": self._gateway.mode,

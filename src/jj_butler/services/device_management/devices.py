@@ -82,25 +82,22 @@ class DeviceStore:
         name: str,
         room: str,
         notes: str | None = None,
-        learn_draft: bool = False,
     ) -> dict[str, Any]:
         now = utc_now_iso()
         device_id = _new_id()
-        extra = {"learn_draft": True} if learn_draft else {}
         with self._db.transaction() as conn:
             if conn.execute("SELECT 1 FROM rooms WHERE name = ?", (room,)).fetchone() is None:
                 raise AppError(ErrorCode.NOT_FOUND, f"房间 {room} 不存在")
             conn.execute(
                 """
                 INSERT INTO devices(id, name, adapter, room, notes, extra, created_at, updated_at)
-                VALUES (?, ?, 'ir', ?, ?, ?, ?, ?)
+                VALUES (?, ?, 'ir', ?, ?, '{}', ?, ?)
                 """,
                 (
                     device_id,
                     name,
                     room,
                     notes,
-                    json.dumps(extra, ensure_ascii=False),
                     now,
                     now,
                 ),
@@ -161,13 +158,13 @@ class DeviceStore:
     def create_function_with_code(
         self, device_id: str, name: str, raw_code: Sequence[int]
     ) -> dict[str, Any]:
-        """学码保存：功能与码同事务落库，并清掉草稿标记。"""
+        """学码保存：功能与码同事务落库。"""
 
         function_id = f"fn_{secrets.token_hex(4)}"
         code_id = f"code_{secrets.token_hex(4)}"
         now = utc_now_iso()
         with self._db.transaction() as conn:
-            row = conn.execute("SELECT extra FROM devices WHERE id = ?", (device_id,)).fetchone()
+            row = conn.execute("SELECT 1 FROM devices WHERE id = ?", (device_id,)).fetchone()
             if row is None:
                 raise AppError(ErrorCode.NOT_FOUND, f"设备 {device_id} 不存在")
 
@@ -179,14 +176,6 @@ class DeviceStore:
                 (function_id, device_id, name, now, now),
             )
             _insert_code_and_prune(conn, device_id, function_id, code_id, raw_code, now)
-
-            extra = json.loads(row["extra"])
-            if isinstance(extra, dict) and extra.get("learn_draft"):
-                extra.pop("learn_draft")
-                conn.execute(
-                    "UPDATE devices SET extra = ?, updated_at = ? WHERE id = ?",
-                    (json.dumps(extra, ensure_ascii=False), now, device_id),
-                )
 
         return {"function_id": function_id, "name": name}
 

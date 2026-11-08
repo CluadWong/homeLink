@@ -93,7 +93,6 @@ export interface LearnSaveResult {
 
 export interface LearnCancelResult {
   device_id: string
-  draft_discarded: boolean
   message: string
 }
 

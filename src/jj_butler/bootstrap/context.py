@@ -69,7 +69,6 @@ def build_context(
     states = DeviceStateStore(db)
     control = ControlService(devices, gateway, audit, states)
     learn = LearnService(
-        db,
         devices,
         gateway,
         audit,

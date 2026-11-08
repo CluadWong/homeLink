@@ -28,7 +28,6 @@ def create_device(request: Request, payload: DeviceCreateRequest) -> dict:
         name=payload.name,
         room=payload.room,
         notes=payload.notes,
-        learn_draft=payload.learn_draft,
     )
     return {"success": True, **device, "trace_id": request.state.trace_id}
 

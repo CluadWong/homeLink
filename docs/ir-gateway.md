@@ -39,6 +39,7 @@
 
 规则：
 
+- 板子读回的 `ir_last_code` 是**逗号分隔的微秒序列**（正数 mark、负数 space），例如 `8997,-4482,566,-1673,…,566,-10000`；新版解析以这个真实格式为准，同时兼容带方括号的字符串与 mock 的 base64url。
 - 回放**固定走 `ir_proxy_tx`**，与设备 id、功能名都无关；载波恒 **38000 Hz**，本期不做配置项。
 - 波形编码为 base64url 无 padding 的小端 int32 数组（正数 mark、负数 space，微秒），必须带 `carrier_frequency`；载荷走 form body，走 query 会因长度 414。
 - 不存在 `switch/{entity}/turn_on` 或 `climate/{entity}/set` 这类按设备类型的控制路径；所有控制都是学码波形回放。
@@ -46,7 +47,7 @@
 ## 4. 学码时序
 
 ```
-POST /api/devices {learn_draft:true} ──▶ 建空壳（失败不留行）
+设备页 POST /api/devices ──▶ 建普通设备（不涉及学码）
 start ──▶ switch/ir_learn_mode/turn_on   （设备侧同时清空 ir_last_code）
          │
          ├─ 客户端每 1s 调 GET /api/learn/capture
@@ -56,24 +57,24 @@ start ──▶ switch/ir_learn_mode/turn_on   （设备侧同时清空 ir_last_
          │        └─ 解析成功    → captured=true, raw_code=[...]
          │
 save ──▶ 落库 ir_codes（DB 为权威，每功能保留最近 3 条，按 `rowid` 倒序保留）→ 再 turn_off
-cancel / 600s 超时 ──▶ 撤空壳 → turn_off
+cancel / 600s 超时 ──▶ turn_off（只停接收态，设备不动）
 ```
 
 - 「保留最近 3 条」按 `ir_codes.rowid` 倒序（不按 `id` 字符串或 `learned_at`），删除更早的行；每次插入后在同一事务内裁剪。
-- 撤壳双条件：仅当草稿标记仍在**且** `device_functions` / `ir_codes` / `device_states` 对该设备全为空时才删设备；`save` 成功后标记被清掉，不会再撤壳。
+- 学码只操作接收态与功能/码；`cancel` 与超时**不删除、不修改设备**。
 - 空闲 TTL 到期由服务端自生成 `trace_id`（原请求已断），审计 `who=system`、`action=learn.idle_timeout`；用户主动取消是 `learn.cancel`，两者不得混淆。
 
 - 产品路径由客户端 1s 调 `capture`，服务端即时读传感器。
 - 开学习模式会清空上次波形，`start` 后读到的必然是本次按键。
 - `hardware/ir-codes/<device_id>.json` 只是历史归档；与库冲突时**以数据库为准**，文件不得反向覆盖库。
-- `start` 不创建设备：草稿由 `POST /api/devices` 创建，`start` 只对已有设备开会话；捕获的 `raw_code` 原样存储，保存前只校验非空、可解析。
+- `start` 不创建设备：设备由设备页创建，`start` 只对已有设备开会话；捕获的 `raw_code` 原样存储，保存前只校验非空、可解析。
 
 ## 5. 双层超时
 
 | 层 | 值 | 职责 | 缺了会怎样 |
 | --- | --- | --- | --- |
 | 客户端 | 10 秒无信号判失败 | 体验：用户立刻知道「没收到」 | 用户在设备前干等 |
-| 服务端 | 600 秒空闲 TTL | 资源：关接收、撤草稿、写 `learn.idle_timeout` | 关标签页/断网后接收态与空壳永久残留 |
+| 服务端 | 600 秒空闲 TTL | 资源：关接收、写 `learn.idle_timeout`，不动设备 | 关标签页/断网后接收态永久残留 |
 
 - 每次 `capture` 重置服务端 TTL；`save` / `cancel` 立即结束会话。两层都不能省：客户端管单次成败，服务端管设备侧不长期占用。
 - 另有发送 10s、探测 3s，二者独立。
@@ -89,7 +90,7 @@ cancel / 600s 超时 ──▶ 撤空壳 → turn_off
 
 - `GET /api/gateway` 探测 `base_url/`，超时 3s，只读；结果缓存 **15 秒**，`refresh=true` 绕过缓存。
 - 探测缓存**只存在进程内存**（`GatewayProbe` 的锁 + 字典）：重启即清零，没有持久化、没有跨进程共享；`last_success_at` 同样只在进程内保留。
-- `last_success_at` 只保留最近一次成功探测时间，失败不清空，用来区分「刚断」与「早就断」。
+- 探测字段语义：`reachable` 只表示**能否连上板子**（401/403 也算 `true`）；`last_success_at` 表示**最后一次拿到有效响应**的时间，401/403、5xx、超时都**不刷新**它，失败也不清空——用来区分「刚断」与「早就断」。错误密码时预期 `reachable=true`、`error` 说明鉴权被拒、`last_success_at` 保持不变。
 - 地址写入只发生 `PUT /api/gateway`：写本地覆盖层 + `config_audit`，返回 `restart_required`。
 - `PUT` 之后 `GET /api/gateway` 立即回显**已保存的新地址**并给出 `pending_restart=true`（已保存、尚未生效）；重启后 `pending_restart=false`。不要让用户看到旧值而误判保存失败。
 - **探测不是控制前置条件**：探测失败只影响状态展示；回放/学码时真正连接失败才返回 503。
@@ -100,7 +101,7 @@ cancel / 600s 超时 ──▶ 撤空壳 → turn_off
 | 发送或读取超时 | 503 `DEVICE_OFFLINE`，文案带秒数 | 查网络与板子负载 |
 | 板子在线但 401/403 | 401 `DEVICE_UNAUTHORIZED` | 核对 `gateway.ir.username / password` |
 | 板子在线但 5xx | 503 `DEVICE_OFFLINE`，文案带 HTTP 状态 | 重启 ESPHome / 查固件 |
-| 波形不规整 | 200 `captured=false, reason=malformed` | 让用户重按，不当作网关故障 |
+| 波形不规整 | 200 `captured=false, reason=malformed`（message 细分空值/格式/长度） | 让用户重按，不当作网关故障 |
 | 学码轮询时网关连不上 | **200** `captured=false, reason=gateway_unreachable` | 会话保留，提示检查网关后可继续轮询；不升级为 503 |
 | 没有活动学码会话时轮询 | 404 `NOT_FOUND` | 重新 `start`（会话已被 save/cancel/TTL 回收） |
 | 空波形保存 | 400 `INVALID_REQUEST` | 重新捕获 |

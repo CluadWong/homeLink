@@ -71,9 +71,9 @@
 成功：`{devices:[...], trace_id}`；设备字段 `id,name,room,adapter,notes,extra,functions[]`；功能字段只有 `id,name`。
 
 **`POST /api/devices`** — 新增设备。
-请求：`{name,room,notes?,learn_draft?}`；**无 id、无 adapter**，服务端生成 `dev_*`，`adapter` 恒 `ir`。
-- `learn_draft=true`：创建空壳设备（`extra.learn_draft=true`，存在 `devices.extra` 里，不新增列），学码会话在它上面开；后续任一步失败即撤壳。**`save` 成功后服务端清掉该标记**，设备转为普通设备。
+请求：`{name,room,notes?}`；**无 id、无 adapter**，服务端生成 `dev_*`，`adapter` 恒 `ir`。
 - 成功：`DeviceDetail`，带 `trace_id`。错误：400 未声明字段；404 房间不存在。
+- 设备只在这里创建；学码不创建设备，也不修改设备字段。
 
 **`GET /api/devices/{id}`** — 详情，含功能列表。错误：404。
 
@@ -96,13 +96,15 @@
 
 ### 2.5 学码（4）
 
-**`POST /api/learn/start`** — `{device_id}`。**只开会话，不创建资源**；设备必须已存在（草稿由 `POST /api/devices` 带 `learn_draft=true` 创建）。成功 `{success,device_id,message,trace_id}`；错误 404 设备不存在、503 网关开不起接收态。
+**`POST /api/learn/start`** — `{device_id}`。**只开会话，不创建资源**；设备必须已在设备页存在。成功 `{success,device_id,message,trace_id}`；错误 404 设备不存在、503 网关开不起接收态、**401 `DEVICE_UNAUTHORIZED` 板子鉴权被拒**（此时会话不建立，message 会指明 `gateway.ir.username / gateway.ir.password`）。
 
-**`GET /api/learn/capture?device_id=`** — 有活动会话时**除鉴权失败外恒 200**。成功 `{captured,device_id,raw_code,message,reason,trace_id}`；`captured=false` 不是错误；`reason` 三值 `no_signal` / `malformed` / `gateway_unreachable`。轮询期间网关连不上时**仍是 200**，用 `reason=gateway_unreachable` 表达，不升级为错误。唯一例外是板子在线但拒绝凭证 → 401 `DEVICE_UNAUTHORIZED`。**没有活动会话（未 `start`、已 `save` / `cancel` 或已被 TTL 回收）→ 404 `NOT_FOUND`**。
+**`GET /api/learn/capture?device_id=`** — **会话已存在**时，除“板子拒绝凭证”外恒 200。成功 `{captured,device_id,raw_code,message,reason,trace_id}`；`captured=false` 不是错误；`reason` 三值 `no_signal` / `malformed` / `gateway_unreachable`；`malformed` 时 `message` 会带「（空值）/（格式不认识）/（长度不足）」细分，便于定位。轮询期间网关连不上时**仍是 200**，用 `reason=gateway_unreachable` 表达，不升级为错误。**会话已存在但轮询读波形时板子拒绝凭证 → 401 `DEVICE_UNAUTHORIZED`。没有活动会话（未 `start`、`start` 因鉴权失败未建立、已 `save` / `cancel` 或已被 TTL 回收）→ 404 `NOT_FOUND`「学码会话不存在或已结束」**。
 
-**`POST /api/learn/save`** — `{device_id,name,raw_code}`。成功 `{function_id,name,receiver_stopped,receiver_error,trace_id}`；先落库再关接收，关失败不回滚码。错误 400 空波形 / 404 / 500。
+- 设计意图：**鉴权错误在 `start` 阶段暴露，不在每秒轮询里反复报**。`start` 需要 `turn_on` 学习模式，鉴权失败即 401 且不建会话；客户端因此看到的是“开始失败”而不是“轮询失败”，一次即可定位到 `settings.local.yaml` 的用户名/密码，也避免留下一个永远读不到波形却仍在轮询的半开会话。
 
-**`POST /api/learn/cancel`** — `{device_id}`，幂等。成功 `{success,device_id,message,draft_discarded,trace_id}`；`draft_discarded=true` 表示空壳已被删除。
+**`POST /api/learn/save`** — `{device_id,name,raw_code}`。`name` 非空且 **≤ 40 字符**（与前端输入框上限一致）。成功 `{function_id,name,receiver_stopped,receiver_error,trace_id}`；先落库再关接收，关失败不回滚码。错误 400 空波形 / 空名 / 超长名 / 404 / 500。
+
+**`POST /api/learn/cancel`** — `{device_id}`，幂等。成功 `{success,device_id,message,trace_id}`；只停接收态，不删除设备。
 
 ### 2.6 控制（1）
 
@@ -134,15 +136,15 @@
 
 ## 3. 学码契约
 
-- 草稿设备由 `POST /api/devices` 的 `learn_draft=true` 创建；`start` 只开会话。这样「创建失败」与「开会话失败」两种失败各归各的端点。
+- 设备由设备页（`POST /api/devices`）创建；`start` 只在已有设备上开会话，不创建、不修改设备。
+- 功能名由用户在**开始学码前**确定；`save` 直接沿用该名字，不要求捕获后二次输入。`name` 非空且 ≤ 40 字符，空白名或超长名一律 400 `INVALID_REQUEST`。
 - `captured=false` 是 200 的正常结果（用户还没按键）；唯一例外是 401 鉴权失败。
 - `reason` 三值：`no_signal` / `malformed` / `gateway_unreachable`，只解释「为什么没捕获」。
-- `save` 原子：校验与落库通过后才关接收；关失败仍 200，用 `receiver_stopped=false` + `receiver_error` 告知。
+- `save` 原子：校验与落库通过后**会话即结束**，再关接收；关失败仍 200，用 `receiver_stopped=false` + `receiver_error` 告知。此时 `capture` 已 404，用户直接重新 `start` 即可（会再次下发 `turn_on`）；`cancel` 仍是幂等的兜底，可在板子恢复后重试关闭接收态。板子断电恢复后 `ir_learn_mode` 的实际取值、以及再次 `turn_on` 能否覆盖残留接收态，待真机验证。
 - `capture` 的“除鉴权失败外恒 200”只约束业务结果，不承诺网络与 5xx 永不发生：出现网络中断、超时或 5xx 时，前端按 `frontend-contract.md` 的学码异常规则停止轮询、尽力 `cancel` 并展示人话，服务端不新增语义。
-- `cancel` 必须返回结构化 `draft_discarded`，调用方不得靠 message 判断。
-- `save` 成功时服务端**清除 `extra.learn_draft` 标记**，草稿设备转为普通设备；`save` 只落 learned 功能与码，不改设备其他字段。
-- 撤壳双条件：仅当 `devices.extra.learn_draft=true` **且** 该设备在 `device_functions` / `ir_codes` / `device_states` 三张子表中全无记录时才删除设备；任一有数据即保留。
-- 空闲 TTL 到期由服务端自生成 `trace_id`（原请求链已断），审计固定 `who=system`、`action=learn.idle_timeout`，与用户主动 `cancel` 区分。
+- `cancel` 只停接收态并结束会话，**不删除设备**；设备生命周期完全由设备页的增删改管理。
+- `save` 只落功能与码，不改设备其他字段。
+- 空闲 TTL 到期由服务端自生成 `trace_id`（原请求链已断），只停接收态、不动设备；审计固定 `who=system`、`action=learn.idle_timeout`，与用户主动 `cancel` 区分。
 
 ## 4. 控制契约
 

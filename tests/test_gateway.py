@@ -2,17 +2,58 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from jj_butler.gateway.base import GatewayError, ProbeOutcome
 from jj_butler.gateway.mock import TEST_WAVEFORM, MockIRGateway
 from jj_butler.gateway.probe import GatewayProbe
-from jj_butler.gateway.waveform import WaveformError, decode_waveform, encode_waveform
+from jj_butler.gateway.waveform import (
+    WaveformEmptyError,
+    WaveformError,
+    WaveformFormatError,
+    WaveformLengthError,
+    decode_waveform,
+    encode_waveform,
+)
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def test_waveform_roundtrip():
     assert decode_waveform(encode_waveform([9000, -4500, 560])) == [9000, -4500, 560]
     assert decode_waveform("[1, -2, 3]") == [1, -2, 3]
+
+
+def test_decode_real_board_csv_sample():
+    """真机 `ir_last_code` 原样是逗号分隔字符串（2026-11-08 从板子 GET 取得）。"""
+
+    text = (FIXTURES / "ir_last_code_real.txt").read_text(encoding="utf-8")
+    values = decode_waveform(text)
+    assert len(values) == 100
+    assert values[0] == 8997
+    assert values[1] == -4482
+    assert values[-1] == -10000
+
+
+def test_decode_bracketed_csv_sample():
+    text = (FIXTURES / "ir_last_code_real.txt").read_text(encoding="utf-8")
+    assert decode_waveform(f"[{text}]") == decode_waveform(text)
+
+
+def test_decode_distinguishes_malformed_kinds():
+    with pytest.raises(WaveformEmptyError) as empty:
+        decode_waveform("  ")
+    assert empty.value.kind == "empty"
+
+    with pytest.raises(WaveformFormatError) as fmt:
+        decode_waveform("abc,def")
+    assert fmt.value.kind == "format"
+
+    with pytest.raises(WaveformLengthError) as short:
+        decode_waveform("9000")
+    assert short.value.kind == "length"
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "!!!", "AA", "AAAA", "[]", '["x"]', "[1, true]"])
@@ -104,6 +145,30 @@ def test_probe_marks_unreachable():
     assert result["reachable"] is False
     assert result["error"] == "boom"
     assert result["last_success_at"] is None
+
+
+def test_probe_401_is_reachable_but_does_not_refresh_success_time():
+    class _AuthRejected(MockIRGateway):
+        calls = 0
+
+        def probe(self) -> ProbeOutcome:
+            type(self).calls += 1
+            if type(self).calls == 1:
+                return ProbeOutcome(reachable=True, latency_ms=0, error=None)
+            return ProbeOutcome(
+                reachable=True,
+                latency_ms=0,
+                error="网关在线但鉴权被拒（HTTP 401）",
+            )
+
+    probe = GatewayProbe(_AuthRejected(), ttl_seconds=15.0)
+    ok = probe.status()
+    assert ok["last_success_at"] is not None
+
+    denied = probe.status(refresh=True)
+    assert denied["reachable"] is True
+    assert "鉴权被拒" in denied["error"]
+    assert denied["last_success_at"] == ok["last_success_at"]
 
 
 def test_real_gateway_requires_both_credentials():

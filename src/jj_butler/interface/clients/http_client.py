@@ -87,13 +87,10 @@ class AgentClient:
         room: str,
         *,
         notes: str = "",
-        learn_draft: bool = False,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"name": name, "room": room}
         if notes:
             body["notes"] = notes
-        if learn_draft:
-            body["learn_draft"] = True
         return self._request("POST", "/api/devices", json=body)
 
     def update_device(

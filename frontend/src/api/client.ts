@@ -194,7 +194,6 @@ export function createDevice(body: {
   name: string
   room: string
   notes?: string
-  learn_draft?: boolean
 }): Promise<Device> {
   return request<Device>('POST', '/api/devices', { body })
 }

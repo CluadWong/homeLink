@@ -36,7 +36,7 @@ rooms 1──n devices 1──n device_functions 1──n ir_codes
 7. **码以最新为有效**：读取永远取 `ir_codes.rowid` 最大（最后写入）的一条；每功能**只保留最近 3 条**，按 `rowid` 倒序保留、其余删除。
 8. **状态唯一权威**：只认 `device_states` 最新记录；`devices` 不存状态。
 9. **状态来源只有两种**：`unknown`（回放后无法确认）与 `confirmed`（用户校正）；不存在 `estimated` 与 `sensed`。
-10. **草稿可删的唯一条件**：设备带 `extra.learn_draft`，且功能、码、状态三表全空（空壳）时，才随学码失败/取消/超时删除。`learn_draft` 只存在 `devices.extra`（JSON），不新增列；`save` 成功后由服务端清除该标记。
+10. **学码不改设备**：学码只在已有设备上开会话；`cancel` 与空闲 TTL 只停接收态，不创建、不删除、不修改设备（`devices.extra` 恒为空对象）。
 
 补充：房间被设备引用时不可删（409）；重命名房间会同步其下设备的 `room`。`audit_logs.level` 恒 `low`（列保留、已无分级）；`audit_logs.device_id` 可空，学码四类动作（`learn.start/save/cancel/idle_timeout`）与控制动作（`{device_id}.control`）写入对应设备 id，便于按设备精确筛选；`config_audit.source` 只取 `startup` / `api`。
 
@@ -61,18 +61,18 @@ rooms 1──n devices 1──n device_functions 1──n ir_codes
 ## 5. 学码状态机
 
 ```
-POST /api/devices {learn_draft:true} ──▶ 建空壳设备（extra.learn_draft=true）
-        │（创建失败不留下任何行）
+设备页 POST /api/devices ──▶ 建普通设备（extra={}）
+        │
         ▼
-POST /api/learn/start {device_id} ──▶ 只开会话，**不再创建资源**
+POST /api/learn/start {device_id} ──▶ 只开会话，不创建、不修改设备
         │
         ├─ GET /api/learn/capture 每 1s（未捕获 captured=false，200）
-        ├─ POST /api/learn/cancel（幂等，返回 draft_discarded）
-        ├─ 服务端 600s 空闲 TTL → 关接收 + 撤壳 + 审计 learn.idle_timeout
+        ├─ POST /api/learn/cancel（幂等，只停接收态）
+        ├─ 服务端 600s 空闲 TTL → 关接收 + 审计 learn.idle_timeout
         └─ POST /api/learn/save → 先落库、再关接收；关失败不回滚码
 ```
 
-- 失败/取消/超时/会话异常统一「撤壳」：仅删三表全空的空壳，有任一数据则保留设备。
+- 失败/取消/超时/会话异常只结束会话与接收态，**设备原样保留**。
 - 客户端 10 秒无信号判本次失败只是提示层；服务端 600s TTL 才是资源回收层。
 - 保存时用户命名，得到 `device_functions` 一行；码落在 `ir_codes`，功能名不参与定位。
 
