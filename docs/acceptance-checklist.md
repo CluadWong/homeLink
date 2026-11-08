@@ -84,7 +84,7 @@
 | Basic 鉴权（双非空才发头） | ✅ mock / 🟢 real | 真机带 Basic 全部 200；错误密码下 `learn/start` 返回 401 `DEVICE_UNAUTHORIZED`，message 指明 `settings.local.yaml` 的 `gateway.ir.username` / `gateway.ir.password` |
 | 真实协议端点与波形 | 🟢 | 学码（`turn_on` + 读 `ir_last_code`）、回放（`transmit`，38000 Hz）均已在真机执行；波形为逗号分隔微秒序列（100 段，末尾 `-10000`），已按真实格式修复并有真实样本回归 |
 | 逐条失败映射（拒连/超时/401/5xx/畸形） | 🟢 部分 | 拒连/超时 → `DEVICE_OFFLINE`（断电实测）；401 → `DEVICE_UNAUTHORIZED`（错误密码实测）；畸形波形三类错误由单测覆盖；真实 5xx 未构造 |
-| 学码时序与「开学习清上次波形」 | 🟢 | 真机学码成功；10 秒无信号 → 明确失败可重试；开始学码后断电 → 超时失败；捕获后断电再保存 → 保存成功 + 接收态未关黄框 |
+| 学码时序与「开学习清上次波形」 | 🟢 | 真机学码成功；10 秒无信号 → 明确失败可重试；开始学码后断电 → 超时失败；捕获后断电再保存 → 保存成功 + 接收态未关黄框；断电重插后 `ir_learn_mode=OFF`，人为置 ON 不挡新会话（见下方补充验证） |
 | 服务端 600s 空闲 TTL | ✅ | `test_learn.py` TTL 用例（只停接收、设备保留） |
 | 客户端 10s 判失败 | 🟢 | 前端轮询与超时提示已在真机断电路径验证 |
 | 单向语义（回放后一律 `unknown`） | ✅ 后端 / 🟢 前端 | 后端单测；前端「试一次 / 调用」在真机执行并显示「已发送」，状态仍 `unknown` |
@@ -104,7 +104,17 @@
 | 错误 Basic 密码 → `learn/start` | 401 `DEVICE_UNAUTHORIZED`，message 指明配置文件与键名 |
 | 状态页网关块 | 板子断电离线、复电自动在线 |
 
-**保留为开放项（未单独验证）**：板子断电恢复后 `ir_learn_mode` 的实际取值，以及「再学一个」能否覆盖残留接收态。风险低——固件重启通常会复位开关，且 `start` 会重新下发 `turn_on`。真实电器的最终动作仍只能人眼确认（红外单向，无回读）。
+**断电恢复与残留接收态补充验证（2026-11-08，只操作 `switch/ir_learn_mode`，未发红外）**：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 板子断电重插、服务在线后 `GET /switch/ir_learn_mode` | `state=OFF`（恢复后复位） |
+| 无活动会话时 `GET /api/learn/capture` | 404 `NOT_FOUND`「学码会话不存在或已结束」 |
+| 人为 `turn_on` 置板子为 ON（`state=ON`）后调 `POST /api/learn/start` | 200「已开始接收红外信号」，残留接收态未挡住新会话 |
+| 该会话 `GET /api/learn/capture`（不按键） | 200，`captured=false`、`reason=no_signal` |
+| `POST /api/learn/cancel` | 200；随后 `GET /switch/ir_learn_mode` 回到 `OFF` |
+
+**仍保留的开放项**：真实电器的最终动作只能人眼确认（红外单向，无回读）。「再学一个」按钮走同一 `start` 路径，本次验证的是该路径本身；未单独在 UI 上点击该按钮复测。
 
 ## 6. `frontend-contract.md`
 
