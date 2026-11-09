@@ -8,9 +8,9 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from jj_butler.bootstrap.context import build_context
-from jj_butler.core.config import ConfigService, ConfigValidationError
-from jj_butler.interface.api.app import create_app
+from homelink.bootstrap.context import build_context
+from homelink.core.config import ConfigService, ConfigValidationError
+from homelink.interface.api.app import create_app
 
 
 def _write_config(config_dir: Path, *, frontend: dict | None) -> None:
@@ -40,7 +40,7 @@ def _client(tmp_path: Path, *, frontend: dict | None) -> TestClient:
 def _make_dist(tmp_path: Path) -> Path:
     dist = tmp_path / "frontend" / "dist"
     (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>JJ 管家</title>", encoding="utf-8")
+    (dist / "index.html").write_text("<!doctype html><title>HomeLink</title>", encoding="utf-8")
     (dist / "assets" / "app.js").write_text("console.log('jj');", encoding="utf-8")
     return dist
 
@@ -51,11 +51,11 @@ def test_serves_index_assets_and_history_fallback(tmp_path):
 
     root = client.get("/")
     assert root.status_code == 200
-    assert "JJ 管家" in root.text
+    assert "HomeLink" in root.text
 
     deep_link = client.get("/devices/abc")
     assert deep_link.status_code == 200
-    assert "JJ 管家" in deep_link.text
+    assert "HomeLink" in deep_link.text
 
     asset = client.get("/assets/app.js")
     assert asset.status_code == 200

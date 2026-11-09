@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from jj_butler.core.database import SCHEMA_VERSION
+from homelink.core.database import SCHEMA_VERSION
 
 NOW = "2026-01-01T00:00:00Z"
 

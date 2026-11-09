@@ -6,8 +6,8 @@ import json
 
 import yaml
 
-from jj_butler.gateway.base import ProbeOutcome
-from jj_butler.gateway.mock import MockIRGateway
+from homelink.gateway.base import ProbeOutcome
+from homelink.gateway.mock import MockIRGateway
 
 
 class _CountingGateway(MockIRGateway):

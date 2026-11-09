@@ -1,11 +1,11 @@
-# JJ-Butler 重建版工具链配置：ruff + black + mypy + pytest。
+# HomeLink 重建版工具链配置：ruff + black + mypy + pytest。
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jj-butler"
+name = "homelink"
 version = "0.1.0"
 description = "红外单向设备管家后端（重建版）"
 requires-python = ">=3.11"
@@ -30,7 +30,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["jj_butler*"]
+include = ["homelink*"]
 
 # ---------- ruff ----------
 [tool.ruff]
@@ -45,7 +45,7 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "SIM"]
 ignore = ["E501"]  # 行宽交给 black 处理
 
 [tool.ruff.lint.isort]
-known-first-party = ["jj_butler"]
+known-first-party = ["homelink"]
 
 # ---------- black ----------
 [tool.black]
@@ -55,7 +55,7 @@ target-version = ["py311"]
 # ---------- mypy ----------
 [tool.mypy]
 python_version = "3.11"
-files = ["src/jj_butler", "tests"]
+files = ["src/homelink", "tests"]
 explicit_package_bases = true
 mypy_path = "src"
 warn_unused_configs = true

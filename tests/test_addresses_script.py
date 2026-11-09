@@ -43,7 +43,7 @@ def _lines(addresses: Any, **overrides: Any) -> list[str]:
 
 def test_ready_prints_local_and_lan_addresses(addresses: Any) -> None:
     text = "\n".join(_lines(addresses))
-    assert "JJ 管家已就绪" in text
+    assert "HomeLink已就绪" in text
     assert "前端（同源）：http://127.0.0.1:8000/" in text
     assert "http://192.168.1.20:8000/" in text
     assert "已配置 token" in text

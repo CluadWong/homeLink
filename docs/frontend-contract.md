@@ -112,7 +112,7 @@
 token 三档优先级：
 
 1. **部署注入** `VITE_API_TOKEN`：构建产物自带，刷新后从构建配置重建；存在时忽略运行时输入。
-2. **当次输入**：未注入时，允许在「设置」里填写一次，只写 **sessionStorage**（键 `jj_butler_api_token`）；storage 不可用时仅存当前页面内存。
+2. **当次输入**：未注入时，允许在「设置」里填写一次，只写 **sessionStorage**（键 `homelink_api_token`）；storage 不可用时仅存当前页面内存。
 3. **未授权**：两者都没有时，请求不带 `Authorization`，后端返回 401 `UNAUTHORIZED`，界面显示「鉴权失败」并引导检查注入或到「设置」填写。
 
 sessionStorage 生命周期：同一标签页内刷新、前进/后退仍有效；**关闭标签页或浏览器即清空**；新标签页不共享；不写入 `localStorage`、IndexedDB、Cookie 等任何持久化存储。401 后可随时在「设置」重新填写或清空。

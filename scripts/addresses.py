@@ -1,7 +1,7 @@
 """登录后显示访问地址：只读配置与健康检查，不启动、不停止服务。
 
 由 `scripts/service/show-addresses.cmd` 在用户登录时调用；服务本身由计划任务
-`JJButler2Service` 在开机时后台启动，本脚本只负责把地址打到终端里。
+`HomeLinkService` 在开机时后台启动，本脚本只负责把地址打到终端里。
 
 用法（仓库根目录）::
 
@@ -42,7 +42,7 @@ def format_addresses(
     """拼出终端展示用的地址行；纯函数，便于测试。"""
 
     addresses = launcher.derive_addresses(host, lan_host, api_port)
-    lines = ["JJ 管家已就绪。" if ready else "JJ 管家尚未就绪（可能仍在启动）。"]
+    lines = ["HomeLink已就绪。" if ready else "HomeLink尚未就绪（可能仍在启动）。"]
     if not ready and reason:
         lines.append(f"  原因：{reason}")
     lines.append("")
@@ -71,7 +71,7 @@ def format_addresses(
 
 def main(argv: list[str] | None = None) -> int:
     launcher.ensure_utf8_output()
-    parser = argparse.ArgumentParser(description="显示 JJ 管家访问地址（不启动服务）")
+    parser = argparse.ArgumentParser(description="显示 HomeLink访问地址（不启动服务）")
     parser.add_argument("--host", default=launcher.DEFAULT_HOST)
     parser.add_argument("--api-port", type=int, default=launcher.DEFAULT_API_PORT)
     parser.add_argument("--wait-seconds", type=float, default=DEFAULT_WAIT_SECONDS)
@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             print(
-                "服务没在运行：开机任务 JJButler2Service 可能还没拉起，或已异常退出。",
+                "服务没在运行：开机任务 HomeLinkService 可能还没拉起，或已异常退出。",
                 flush=True,
             )
             print("  查看服务日志：logs\\service.log", flush=True)

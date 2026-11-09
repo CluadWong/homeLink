@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from jj_butler.gateway.base import GatewayError, ProbeOutcome
-from jj_butler.gateway.mock import TEST_WAVEFORM, MockIRGateway
-from jj_butler.gateway.probe import GatewayProbe
-from jj_butler.gateway.waveform import (
+from homelink.gateway.base import GatewayError, ProbeOutcome
+from homelink.gateway.mock import TEST_WAVEFORM, MockIRGateway
+from homelink.gateway.probe import GatewayProbe
+from homelink.gateway.waveform import (
     WaveformEmptyError,
     WaveformError,
     WaveformFormatError,
@@ -172,7 +172,7 @@ def test_probe_401_is_reachable_but_does_not_refresh_success_time():
 
 
 def test_real_gateway_requires_both_credentials():
-    from jj_butler.gateway.real import RealIRGateway
+    from homelink.gateway.real import RealIRGateway
 
     gateway = RealIRGateway("http://gw.local", "  ", "secret")
     assert gateway._auth() is None  # 用户名空 → 不发鉴权

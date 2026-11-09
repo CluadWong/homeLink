@@ -6,8 +6,8 @@ import json
 import time
 from pathlib import Path
 
-from jj_butler.gateway.base import GatewayError
-from jj_butler.gateway.mock import TEST_WAVEFORM, MockIRGateway
+from homelink.gateway.base import GatewayError
+from homelink.gateway.mock import TEST_WAVEFORM, MockIRGateway
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -303,7 +303,7 @@ def test_codes_kept_to_latest_three(context):
 def context_client(context):
     from fastapi.testclient import TestClient
 
-    from jj_butler.interface.api.app import create_app
+    from homelink.interface.api.app import create_app
 
     return TestClient(create_app(context))
 

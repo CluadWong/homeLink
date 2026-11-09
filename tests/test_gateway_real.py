@@ -8,9 +8,9 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from jj_butler.gateway.base import GatewayOfflineError, GatewayUnauthorizedError
-from jj_butler.gateway.real import IR_CARRIER_FREQUENCY_HZ, RealIRGateway
-from jj_butler.gateway.waveform import decode_waveform, encode_waveform
+from homelink.gateway.base import GatewayOfflineError, GatewayUnauthorizedError
+from homelink.gateway.real import IR_CARRIER_FREQUENCY_HZ, RealIRGateway
+from homelink.gateway.waveform import decode_waveform, encode_waveform
 
 BASE_URL = "http://gw.local"
 

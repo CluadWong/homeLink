@@ -1,8 +1,8 @@
-﻿# 卸载 JJ 管家开机自启（需要管理员权限）。
+﻿# 卸载 HomeLink开机自启（需要管理员权限）。
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 #
-# 停止并删除 JJButler2Service（开机启动）与 JJButler2Addresses（登录后显示地址）。
+# 停止并删除 HomeLinkService（开机启动）与 HomeLinkAddresses（登录后显示地址）。
 # 旧项目任务 JJButlerService 默认保持停用；加 -RestoreOldService 可重新启用它。
 
 [CmdletBinding()]
@@ -18,8 +18,8 @@ New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 Start-Transcript -Path (Join-Path $logsDir 'service-install.log') -Append | Out-Null
 
 $oldTaskName = 'JJButlerService'
-$serviceTaskName = 'JJButler2Service'
-$addressTaskName = 'JJButler2Addresses'
+$serviceTaskName = 'HomeLinkService'
+$addressTaskName = 'HomeLinkAddresses'
 
 function Assert-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()

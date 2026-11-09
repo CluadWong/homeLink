@@ -1,4 +1,4 @@
-# JJ-Butler
+# HomeLink
 
 红外单向设备管家（控制器版）的后端服务与过渡前端：所有设备在运行期创建，学码后按功能回放，并维护一份带可信度等级的虚拟状态。
 
@@ -15,12 +15,12 @@
 python -m venv .venv
 .venv\Scripts\Activate.ps1        # Windows PowerShell；macOS/Linux: source .venv/bin/activate
 pip install -e .                  # 后端运行时依赖（开发/测试再装 requirements.txt）
-uvicorn jj_butler.interface.api.app:app --host 0.0.0.0 --port 8000
+uvicorn homelink.interface.api.app:app --host 0.0.0.0 --port 8000
 ```
 
-- 工作目录为仓库根即可；包是标准 src-layout（`src/jj_butler/...`），`src/` 本身不是包。
-- 默认配置目录 `./config`、默认库 `./data/jj_butler.db`；离开仓库时用环境变量指定：
-  `JJ_BUTLER_CONFIG_DIR`（配置目录）、`JJ_BUTLER_DB_PATH`（SQLite 文件路径）。
+- 工作目录为仓库根即可；包是标准 src-layout（`src/homelink/...`），`src/` 本身不是包。
+- 默认配置目录 `./config`、默认库 `./data/homelink.db`；离开仓库时用环境变量指定：
+  `HOMELINK_CONFIG_DIR`（配置目录）、`HOMELINK_DB_PATH`（SQLite 文件路径）。
 - 一键启动：`python scripts/start.py`（只拉起 uvicorn，默认 8000）。日志写 `logs/backend.log`；Ctrl+C 会终止后端，不留孤儿进程。前端构建：`cd frontend && npm install && npm run build`。
 - 前端页面与 `/api` **同源**：dist 存在时 `GET /` 直接打开页面（history 路由回退 `index.html`），`/api/*` 的 404 仍是 JSON 错误信封。**生产不使用 Vite dev server**。
 - `frontend-contract.md` 的 Vue 前端已交付并在 `frontend/dist` 构建通过（本仓库不做 UI 自动化测试）；Streamlit 六页代码保留，但已不是启动入口。

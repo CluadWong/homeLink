@@ -6,9 +6,9 @@ import json
 
 import yaml
 
-from jj_butler.core.timeutil import utc_now_iso
-from jj_butler.gateway.base import GatewayOfflineError, ProbeOutcome
-from jj_butler.gateway.mock import TEST_WAVEFORM, MockIRGateway
+from homelink.core.timeutil import utc_now_iso
+from homelink.gateway.base import GatewayOfflineError, ProbeOutcome
+from homelink.gateway.mock import TEST_WAVEFORM, MockIRGateway
 
 
 def create_device(client, *, name: str = "测试灯") -> dict:

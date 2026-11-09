@@ -121,7 +121,7 @@ def build_child_env(
     """向后端注入 token、配置目录与地址；不修改调用方传入的环境。
 
     把 `src/` 放进 `PYTHONPATH`：即使当前解释器的可编辑安装不完整，子进程也能从
-    仓库源码导入 `jj_butler`（启动脚本的硬要求是工作目录为仓库根）。
+    仓库源码导入 `homelink`（启动脚本的硬要求是工作目录为仓库根）。
     """
 
     env = dict(base)
@@ -129,7 +129,7 @@ def build_child_env(
     env["PYTHONPATH"] = str(src_path) if not existing else f"{src_path}{os.pathsep}{existing}"
     env["JJ_API_TOKEN"] = token
     env["JJ_AGENT_URL"] = agent_url
-    env["JJ_BUTLER_CONFIG_DIR"] = str(config_dir)
+    env["HOMELINK_CONFIG_DIR"] = str(config_dir)
     return env
 
 
@@ -278,7 +278,7 @@ def _print_addresses(host: str, api_port: int, token: str, *, dist_ready: bool, 
 
 def main(argv: list[str] | None = None) -> int:
     ensure_utf8_output()
-    parser = argparse.ArgumentParser(description="启动 JJ 管家后端（前端同源托管）")
+    parser = argparse.ArgumentParser(description="启动 HomeLink后端（前端同源托管）")
     parser.add_argument("--host", default=DEFAULT_HOST, help="监听地址，默认 0.0.0.0（允许局域网）")
     parser.add_argument("--api-port", type=int, default=DEFAULT_API_PORT)
     parser.add_argument(
@@ -289,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    config_dir = Path(os.environ.get("JJ_BUTLER_CONFIG_DIR", CONFIG_DIR))
+    config_dir = Path(os.environ.get("HOMELINK_CONFIG_DIR", CONFIG_DIR))
     try:
         settings = read_effective_settings(config_dir)
     except (OSError, ValueError, yaml.YAMLError) as exc:
@@ -323,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     elif not dist_ready:
         _say(frontend_hint(dist))
     _say(
-        f"启动后端：uvicorn jj_butler.interface.api.app:app --host {args.host} --port {args.api_port}"
+        f"启动后端：uvicorn homelink.interface.api.app:app --host {args.host} --port {args.api_port}"
     )
     _say(f"后端日志：{BACKEND_LOG}")
 
@@ -333,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.executable,
             "-m",
             "uvicorn",
-            "jj_butler.interface.api.app:app",
+            "homelink.interface.api.app:app",
             "--host",
             args.host,
             "--port",

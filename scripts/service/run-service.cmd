@@ -1,5 +1,5 @@
 @echo off
-rem Boot entry called by scheduled task JJButler2Service. Do not double-click (port 8000).
+rem Boot entry called by scheduled task HomeLinkService. Do not double-click (port 8000).
 rem Startup output (including access addresses) goes to logs\service.log.
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8

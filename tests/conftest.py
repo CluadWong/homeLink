@@ -13,12 +13,12 @@ from fastapi.testclient import TestClient
 
 # 模块级 app 会在 import 时装配；把它的数据库指到临时目录，测试绝不碰仓库 data/。
 os.environ.setdefault(
-    "JJ_BUTLER_DB_PATH",
-    str(Path(tempfile.mkdtemp(prefix="jj-butler-test-boot-")) / "boot.db"),
+    "HOMELINK_DB_PATH",
+    str(Path(tempfile.mkdtemp(prefix="homelink-test-boot-")) / "boot.db"),
 )
 
-from jj_butler.bootstrap.context import AppContext, build_context  # noqa: E402
-from jj_butler.interface.api.app import create_app  # noqa: E402
+from homelink.bootstrap.context import AppContext, build_context  # noqa: E402
+from homelink.interface.api.app import create_app  # noqa: E402
 
 BASE_SETTINGS: dict[str, Any] = {
     "gateway": {

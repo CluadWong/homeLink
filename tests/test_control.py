@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from jj_butler.core.timeutil import utc_now_iso
-from jj_butler.gateway.base import GatewayError, ProbeOutcome
-from jj_butler.gateway.mock import TEST_WAVEFORM, MockIRGateway
+from homelink.core.timeutil import utc_now_iso
+from homelink.gateway.base import GatewayError, ProbeOutcome
+from homelink.gateway.mock import TEST_WAVEFORM, MockIRGateway
 
 
 def _make_function(

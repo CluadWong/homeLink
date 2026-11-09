@@ -7,13 +7,13 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from jj_butler.interface.clients.http_client import (
+from homelink.interface.clients.http_client import (
     AGENT_UNREACHABLE,
     AgentClient,
     ApiError,
     shared_client,
 )
-from jj_butler.interface.clients.streamlit import errors
+from homelink.interface.clients.streamlit import errors
 
 Handler = Callable[[httpx.Request], httpx.Response]
 

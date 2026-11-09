@@ -1,4 +1,4 @@
-# JJ-Butler（从 0 重建版）
+# HomeLink（从 0 重建版）
 
 红外单向设备管家（控制器版）：FastAPI + SQLite 后端，配 Vue 3 + Vite 正式前端（`frontend/`，构建产物由后端同源托管）；`interface/clients/streamlit/` 是保留的旧过渡代码，已不是启动入口。
 
@@ -12,13 +12,13 @@
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
-uvicorn jj_butler.interface.api.app:app --host 0.0.0.0 --port 8000
+uvicorn homelink.interface.api.app:app --host 0.0.0.0 --port 8000
 ```
 
 - 默认 `mock` 模式：不连真实板子、不发红外。
 - 前端（Vue）构建产物为 `frontend/dist`，不入 git：独立运行前需执行一次 `cd frontend && npm install && npm run build` 生成，或从已构建环境拷贝 dist 目录。构建后与 `/api` **同源**：浏览器直接打开 `http://127.0.0.1:8000/`。生产不使用 Vite dev server。
 - 一键启动：`python scripts/start.py`（只拉起 uvicorn，日志写 `logs/backend.log`，Ctrl+C 不留孤儿进程）。
-- 离开本仓库运行时，用环境变量 `JJ_BUTLER_CONFIG_DIR`（配置目录）与 `JJ_BUTLER_DB_PATH`（SQLite 文件）指定路径。
+- 离开本仓库运行时，用环境变量 `HOMELINK_CONFIG_DIR`（配置目录）与 `HOMELINK_DB_PATH`（SQLite 文件）指定路径。
 
 ### 开机自启与查看地址
 
@@ -33,8 +33,8 @@ powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 
 | 任务 | 触发 | 行为 |
 | --- | --- | --- |
-| `JJButler2Service` | 开机（以 SYSTEM 运行，无需登录） | 后台静默执行 `scripts\service\run-service.cmd`，启动输出含访问地址，写 `logs\service.log` |
-| `JJButler2Addresses` | 用户登录 | 弹出终端执行 `scripts\service\show-addresses.cmd`，只显示当前访问地址，不重复启动服务 |
+| `HomeLinkService` | 开机（以 SYSTEM 运行，无需登录） | 后台静默执行 `scripts\service\run-service.cmd`，启动输出含访问地址，写 `logs\service.log` |
+| `HomeLinkAddresses` | 用户登录 | 弹出终端执行 `scripts\service\show-addresses.cmd`，只显示当前访问地址，不重复启动服务 |
 
 - 安装脚本会**停用**旧项目的 `JJButlerService`（只停用不删除）；不想动旧任务时加 `-KeepOldService`。
 - 卸载后旧任务保持停用；需要恢复时执行 `uninstall-service.ps1 -RestoreOldService`。

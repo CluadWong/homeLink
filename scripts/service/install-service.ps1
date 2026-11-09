@@ -1,11 +1,11 @@
-﻿# 安装 JJ 管家开机自启（需要管理员权限）。
+﻿# 安装 HomeLink开机自启（需要管理员权限）。
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
 #
 # 做三件事：
 #   1. 停用旧项目的计划任务 JJButlerService（只停用不删除；-KeepOldService 可跳过）；
-#   2. 注册 JJButler2Service：开机启动、后台静默，输出写 logs\service.log；
-#   3. 注册 JJButler2Addresses：用户登录后弹出终端显示访问地址。
+#   2. 注册 HomeLinkService：开机启动、后台静默，输出写 logs\service.log；
+#   3. 注册 HomeLinkAddresses：用户登录后弹出终端显示访问地址。
 #
 # 卸载见 uninstall-service.ps1。日志写 logs\service-install.log。
 
@@ -24,8 +24,8 @@ Start-Transcript -Path (Join-Path $logsDir 'service-install.log') -Append | Out-
 
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 $oldTaskName = 'JJButlerService'
-$serviceTaskName = 'JJButler2Service'
-$addressTaskName = 'JJButler2Addresses'
+$serviceTaskName = 'HomeLinkService'
+$addressTaskName = 'HomeLinkAddresses'
 
 function Assert-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -115,7 +115,7 @@ try {
         $_.ProcessId -ne $PID -and $_.CommandLine -and (
             $_.CommandLine -like '*run-service.cmd*' -or
             $_.CommandLine -like '*scripts\start.py*' -or
-            $_.CommandLine -like '*jj_butler.interface.api.app*'
+            $_.CommandLine -like '*homelink.interface.api.app*'
         )
     }
     foreach ($proc in $stale) {
@@ -142,7 +142,7 @@ try {
         -Trigger $serviceTrigger `
         -Principal $servicePrincipal `
         -Settings $serviceSettings `
-        -Description 'JJ 管家（重建版）：开机后台启动 uvicorn，日志 logs\service.log' `
+        -Description 'HomeLink（重建版）：开机后台启动 uvicorn，日志 logs\service.log' `
         -Force | Out-Null
     if ($null -eq (Get-ScheduledTask -TaskName $serviceTaskName -ErrorAction SilentlyContinue)) {
         throw "任务 $serviceTaskName 注册失败（任务列表里找不到）。"
@@ -164,7 +164,7 @@ try {
         -Trigger $addressTrigger `
         -Principal $addressPrincipal `
         -Settings $addressSettings `
-        -Description 'JJ 管家（重建版）：登录后弹出终端显示访问地址' `
+        -Description 'HomeLink（重建版）：登录后弹出终端显示访问地址' `
         -Force | Out-Null
     Write-Host "已注册 $addressTaskName（登录后显示访问地址）。"
 

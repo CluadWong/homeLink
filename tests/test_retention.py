@@ -6,10 +6,10 @@ from pathlib import Path
 
 import yaml
 
-from jj_butler.bootstrap import context as context_module
-from jj_butler.bootstrap.context import build_context
-from jj_butler.core.database import Database
-from jj_butler.core.timeutil import utc_now_iso
+from homelink.bootstrap import context as context_module
+from homelink.bootstrap.context import build_context
+from homelink.core.database import Database
+from homelink.core.timeutil import utc_now_iso
 
 OLD = "2000-01-01T00:00:00Z"
 

@@ -1,7 +1,7 @@
 # 开发路线图
 
 本文件规划「红外设备管家（执行层）」到「上层智能管家 Agent」的演进顺序与验收口径。
-定位不变：本仓库负责设备、学码、单次回放、虚拟状态与审计；**Agent 是独立进程**，只通过 HTTP 调用本服务，不进入 `jj_butler` 包、不直接读写 SQLite。
+定位不变：本仓库负责设备、学码、单次回放、虚拟状态与审计；**Agent 是独立进程**，只通过 HTTP 调用本服务，不进入 `homelink` 包、不直接读写 SQLite。
 
 ## 现状基线（2026-11-09）
 
@@ -11,7 +11,7 @@
 | 前端 | Vue 3 正式前端已构建并由后端同源托管；Streamlit 六页保留但非启动入口 |
 | 硬件 | 一台 ESPHome 红外网关；`mock` / `real` 只靠配置切换 |
 | 验证 | 全量 pytest 202 passed；学码 / 回放链路已在真机复测通过；传感器未接入 |
-| 运维 | 开机静默自启（计划任务 `JJButler2Service`）+ 登录后地址展示（`JJButler2Addresses`） |
+| 运维 | 开机静默自启（计划任务 `HomeLinkService`）+ 登录后地址展示（`HomeLinkAddresses`） |
 | 已知遗留 | 全仓 black 有 2 个历史文件待格式化、mypy 有 1 处历史报错；`src/brain|core|gateway` 为空的残留目录 |
 
 ## 总体原则
@@ -72,7 +72,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 
 **目标**：本地对话完成「找到设备 → 找到功能 → 确认 → 调用」的最小闭环。
 
-- 新目录 `agent/`，独立进程，通过 HTTP 调用本服务；不 import `jj_butler`、不访问数据库文件。
+- 新目录 `agent/`，独立进程，通过 HTTP 调用本服务；不 import `homelink`、不访问数据库文件。
 - 工具集控制在 5–8 个：`list_devices`、`list_functions`、`control`、`get_state`、`correct_state`、`get_audit`。
 - 工具参数只保留 `device_id` / `function_id` 等简单字段；工具描述短、枚举明确，适配 4B 模型的工具调用能力。
 - 兜底策略：意图分类用窄集合 + 规则 / 词表；模型输出无法解析时降级为反问。

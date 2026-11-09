@@ -24,7 +24,7 @@ const router = createRouter({
 
 router.afterEach((route) => {
   const title = typeof route.meta.title === 'string' ? route.meta.title : ''
-  document.title = title ? `${title} · JJ 管家` : 'JJ 管家 · 红外控制台'
+  document.title = title ? `${title} · HomeLink` : 'HomeLink · 红外控制台'
 })
 
 export default router

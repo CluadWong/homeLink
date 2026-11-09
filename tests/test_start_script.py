@@ -72,7 +72,7 @@ def test_build_child_env_injects_without_mutating_base(start: Any, tmp_path: Pat
     )
     assert env["JJ_API_TOKEN"] == "fresh-token"
     assert env["JJ_AGENT_URL"] == "http://127.0.0.1:8000"
-    assert env["JJ_BUTLER_CONFIG_DIR"] == str(tmp_path / "config")
+    assert env["HOMELINK_CONFIG_DIR"] == str(tmp_path / "config")
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path / "src")
     assert base["JJ_API_TOKEN"] == "stale"
     assert "PYTHONPATH" not in base

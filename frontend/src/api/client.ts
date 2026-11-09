@@ -19,7 +19,7 @@ import type {
   Room,
 } from './types'
 
-const TOKEN_KEY = 'jj_butler_api_token'
+const TOKEN_KEY = 'homelink_api_token'
 const REQUEST_TIMEOUT_MS = 30_000
 const TRACE_MAX_LENGTH = 64
 

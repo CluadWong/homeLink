@@ -7,7 +7,7 @@ __pycache__/
 data/*
 !data/.gitkeep
 config/*.local.yaml
-jj_butler.egg-info/
+homelink.egg-info/
 
 logs/
 node_modules/

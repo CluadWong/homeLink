@@ -58,7 +58,7 @@
 ## 4. 目录骨架
 
 ```
-src/jj_butler/
+src/homelink/
   core/         配置服务、SQLite、时间工具 —— 无业务
   gateway/      IRGateway 抽象、mock/real、探测缓存
   brain/        审计落点（AuditSink）；策略引擎已删除
@@ -71,7 +71,7 @@ config/          settings / devices（房间种子）+ *.local.yaml
 hardware/ir-codes/  设备侧历史归档，不作为数据源
 ```
 
-启动式固定为 `uvicorn jj_butler.interface.api.app:app`（工作目录为仓库根；包是标准 src-layout，`src/` 本身不是包）。
+启动式固定为 `uvicorn homelink.interface.api.app:app`（工作目录为仓库根；包是标准 src-layout，`src/` 本身不是包）。
 
 ## 5. 压缩 ADR
 

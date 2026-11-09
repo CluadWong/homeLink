@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from jj_butler.core.config import ConfigError, ConfigService
-from jj_butler.interface.api.app import create_app_from_env
+from homelink.core.config import ConfigError, ConfigService
+from homelink.interface.api.app import create_app_from_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,7 +77,7 @@ def test_minimal_example_files_are_enough_to_build_app(tmp_path):
     _write(tmp_path, "settings.yaml", _VALID_SETTINGS)
     _write(tmp_path, "devices.yaml", _VALID_DEVICES)
 
-    app = create_app_from_env(tmp_path, tmp_path / "data" / "jj_butler.db")
+    app = create_app_from_env(tmp_path, tmp_path / "data" / "homelink.db")
 
     assert app.state.context.config.settings.gateway.mode == "mock"
 
@@ -89,11 +89,11 @@ def test_cli_entrypoint_prints_same_message_and_exits_nonzero(tmp_path):
     env = {
         **os.environ,
         "PYTHONPATH": str(_REPO_ROOT / "src"),
-        "JJ_BUTLER_CONFIG_DIR": str(config_dir),
-        "JJ_BUTLER_DB_PATH": str(tmp_path / "cli.sqlite"),
+        "HOMELINK_CONFIG_DIR": str(config_dir),
+        "HOMELINK_DB_PATH": str(tmp_path / "cli.sqlite"),
     }
     result = subprocess.run(
-        [sys.executable, "-c", "import jj_butler.interface.api.app"],
+        [sys.executable, "-c", "import homelink.interface.api.app"],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,

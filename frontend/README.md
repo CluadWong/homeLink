@@ -1,4 +1,4 @@
-# JJ 管家 · 红外控制器前端
+# HomeLink · 红外控制器前端
 
 Vue 3 + Vite + TypeScript + Vant 4 + Vue Router。移动优先，桌面同样可用。
 只通过 HTTP 访问后端，不读数据库、不 import 后端模块。
@@ -18,7 +18,7 @@ npm run dev
 后端默认就是 mock 模式，直接启动即可联调（不会连真实板子、不会发真实红外）：
 
 ```bash
-uvicorn jj_butler.interface.api.app:app --host 127.0.0.1 --port 8000
+uvicorn homelink.interface.api.app:app --host 127.0.0.1 --port 8000
 ```
 
 ## token 配置
@@ -26,7 +26,7 @@ uvicorn jj_butler.interface.api.app:app --host 127.0.0.1 --port 8000
 1. **部署注入（首选）**：复制 `.env.example` 为 `.env.local`，填写 `VITE_API_TOKEN`。
    构建时注入；刷新后从注入配置重建，不依赖浏览器存储。
 2. **当次输入**：没有注入时，页面顶部的「设置」折叠区会出现一次性手动填写入口，
-   值只存 `sessionStorage` 的 `jj_butler_api_token`（storage 不可用时仅存当前页面内存）。
+   值只存 `sessionStorage` 的 `homelink_api_token`（storage 不可用时仅存当前页面内存）。
    同一标签页刷新仍有效，**关闭标签页即失效**；不写 `localStorage`。
 3. 代码里没有硬编码任何真实 token。
 
@@ -66,7 +66,7 @@ nginx 示例：
 ```nginx
 server {
     listen 80;
-    root /srv/jj-butler/frontend/dist;
+    root /srv/homelink/frontend/dist;
 
     location /api/ {
         proxy_pass http://127.0.0.1:8000;

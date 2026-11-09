@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from jj_butler.core import config as config_module
-from jj_butler.core.config import (
+from homelink.core import config as config_module
+from homelink.core.config import (
     ConfigError,
     ConfigService,
     InMemoryConfigAuditStore,
     SqliteConfigAuditStore,
 )
-from jj_butler.core.database import Database
+from homelink.core.database import Database
 
 SETTINGS = {
     "gateway": {
