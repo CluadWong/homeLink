@@ -18,12 +18,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 可选组件：MCP 服务壳（src/homelink_mcp），服务端本体不依赖它。
+mcp = [
+  "mcp>=1.2,<2",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",
   "black>=24.0",
   "mypy>=1.11",
 ]
+
+[project.scripts]
+homelink-mcp = "homelink_mcp.server:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -45,7 +52,7 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "SIM"]
 ignore = ["E501"]  # 行宽交给 black 处理
 
 [tool.ruff.lint.isort]
-known-first-party = ["homelink"]
+known-first-party = ["homelink", "homelink_mcp"]
 
 # ---------- black ----------
 [tool.black]
@@ -55,7 +62,7 @@ target-version = ["py311"]
 # ---------- mypy ----------
 [tool.mypy]
 python_version = "3.11"
-files = ["src/homelink", "tests"]
+files = ["src/homelink", "src/homelink_mcp", "tests"]
 explicit_package_bases = true
 mypy_path = "src"
 warn_unused_configs = true
