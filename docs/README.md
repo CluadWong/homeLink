@@ -44,4 +44,4 @@ uvicorn jj_butler.interface.api.app:app --host 0.0.0.0 --port 8000
 
 ## 文档索引
 
-[scope.md](scope.md)（范围）· [architecture.md](architecture.md)（架构）· [domain-and-data.md](domain-and-data.md)（领域与数据）· [api-contract.md](api-contract.md)（API 契约）· [ir-gateway.md](ir-gateway.md)（红外网关）· [frontend-contract.md](frontend-contract.md)（前端契约）· [acceptance-checklist.md](acceptance-checklist.md)（验收清单）。
+[scope.md](scope.md)（范围）· [architecture.md](architecture.md)（架构）· [domain-and-data.md](domain-and-data.md)（领域与数据）· [api-contract.md](api-contract.md)（API 契约）· [ir-gateway.md](ir-gateway.md)（红外网关）· [frontend-contract.md](frontend-contract.md)（前端契约）· [acceptance-checklist.md](acceptance-checklist.md)（验收清单）· [roadmap.md](roadmap.md)（开发路线图）。
