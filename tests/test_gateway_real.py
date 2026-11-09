@@ -8,7 +8,11 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from homelink.gateway.base import GatewayOfflineError, GatewayUnauthorizedError
+from homelink.gateway.base import (
+    GatewayOfflineError,
+    GatewayTimeoutError,
+    GatewayUnauthorizedError,
+)
 from homelink.gateway.real import IR_CARRIER_FREQUENCY_HZ, RealIRGateway
 from homelink.gateway.waveform import decode_waveform, encode_waveform
 
@@ -65,14 +69,14 @@ def test_auth_rejection_maps_to_unauthorized(status):
     assert "鉴权被拒" in caught.value.message
 
 
-def test_timeout_maps_to_offline():
+def test_timeout_maps_to_gateway_timeout():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectTimeout("timed out")
 
     gateway = make_gateway(handler)
-    with pytest.raises(GatewayOfflineError) as caught:
+    with pytest.raises(GatewayTimeoutError) as caught:
         gateway.start_learn()
-    assert caught.value.kind == "unreachable"
+    assert caught.value.kind == "timeout"
     assert "无响应" in caught.value.message
 
 

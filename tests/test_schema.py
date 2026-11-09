@@ -1,4 +1,4 @@
-"""schema 与不变式：v1 最终 DDL、禁建结构、约束、级联。"""
+"""schema 与不变式：v2 最终 DDL、禁建结构、约束、级联。"""
 
 from __future__ import annotations
 
@@ -6,9 +6,82 @@ import sqlite3
 
 import pytest
 
-from homelink.core.database import SCHEMA_VERSION
+from homelink.core.database import SCHEMA_VERSION, Database
 
 NOW = "2026-01-01T00:00:00Z"
+
+V1_DDL = """
+CREATE TABLE rooms (
+    name         TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL
+);
+
+CREATE TABLE devices (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    adapter    TEXT NOT NULL DEFAULT 'ir' CHECK (adapter = 'ir'),
+    room       TEXT NOT NULL REFERENCES rooms(name) ON UPDATE CASCADE,
+    notes      TEXT,
+    extra      TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(extra)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE device_functions (
+    id         TEXT PRIMARY KEY,
+    device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE ir_codes (
+    id          TEXT PRIMARY KEY,
+    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    function_id TEXT NOT NULL REFERENCES device_functions(id) ON DELETE CASCADE,
+    raw_code    TEXT NOT NULL CHECK (json_valid(raw_code) AND json_array_length(raw_code) > 0),
+    learned_at  TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE device_states (
+    id           TEXT PRIMARY KEY,
+    device_id    TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    state        TEXT NOT NULL,
+    state_source TEXT NOT NULL CHECK (state_source IN ('unknown', 'confirmed')),
+    reason       TEXT,
+    trace_id     TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+
+CREATE TABLE audit_logs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    who        TEXT NOT NULL CHECK (who IN ('user', 'system')),
+    action     TEXT NOT NULL,
+    context    TEXT,
+    reason     TEXT,
+    level      TEXT NOT NULL DEFAULT 'low' CHECK (level = 'low'),
+    result     TEXT NOT NULL CHECK (result IN ('success', 'failed')),
+    trace_id   TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE config_audit (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    file       TEXT NOT NULL,
+    key_path   TEXT NOT NULL,
+    old_value  TEXT,
+    new_value  TEXT,
+    who        TEXT NOT NULL CHECK (who IN ('user', 'system')),
+    source     TEXT NOT NULL CHECK (source IN ('startup', 'api')),
+    result     TEXT NOT NULL CHECK (result IN ('applied', 'rejected', 'rolled_back')),
+    error      TEXT,
+    trace_id   TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
 
 
 def table_names(context) -> set[str]:
@@ -49,12 +122,90 @@ def insert_function(context, device_id: str, function_id: str = "fn_test") -> st
     return function_id
 
 
-def test_user_version_is_one(context):
-    assert SCHEMA_VERSION == 1
-    assert context.db.user_version() == 1
+def test_v1_database_migrates_in_place(tmp_path):
+    db_path = tmp_path / "v1.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(V1_DDL)
+        conn.execute("PRAGMA user_version = 1")
+        conn.execute(
+            "INSERT INTO rooms(name, display_name, created_at) VALUES ('living_room', '客厅', ?)",
+            (NOW,),
+        )
+        conn.execute(
+            """
+            INSERT INTO devices(id, name, adapter, room, notes, extra, created_at, updated_at)
+            VALUES ('dev_old', '旧灯', 'ir', 'living_room', NULL, '{}', ?, ?)
+            """,
+            (NOW, NOW),
+        )
+        conn.execute(
+            """
+            INSERT INTO device_functions(id, device_id, name, created_at, updated_at)
+            VALUES ('fn_old', 'dev_old', '开', ?, ?)
+            """,
+            (NOW, NOW),
+        )
+        conn.execute(
+            """
+            INSERT INTO ir_codes(id, device_id, function_id, raw_code, learned_at, created_at)
+            VALUES ('code_old', 'dev_old', 'fn_old', '[100, -200]', ?, ?)
+            """,
+            (NOW, NOW),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    db = Database(db_path)
+    db.initialize()
+
+    assert db.user_version() == 2
+    with db.reader() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        assert tables == {
+            "rooms",
+            "devices",
+            "device_functions",
+            "ir_codes",
+            "device_states",
+            "audit_logs",
+            "config_audit",
+            "scenes",
+            "scene_items",
+            "command_requests",
+        }
+        assert conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM ir_codes").fetchone()[0] == 1
+        audit_columns = {row["name"] for row in conn.execute("PRAGMA table_info(audit_logs)")}
+        assert "device_id" in audit_columns
+        conn.execute("INSERT INTO scenes(id, name, created_at) VALUES ('sc_1', '回家', ?)", (NOW,))
+        conn.execute(
+            """
+            INSERT INTO command_requests(
+                request_id, device_id, function_id, command, parameters, actor,
+                status, error_code, error_message, trace_id, created_at, updated_at
+            ) VALUES ('req_1', 'dev_old', 'fn_old', 'open', '{}', 'user',
+                      'running', NULL, NULL, 'trace', ?, ?)
+            """,
+            (NOW, NOW),
+        )
+
+    db.initialize()
+    assert db.user_version() == 2
 
 
-def test_exactly_seven_tables(context):
+def test_user_version_is_two(context):
+    assert SCHEMA_VERSION == 2
+    assert context.db.user_version() == 2
+
+
+def test_exactly_ten_tables(context):
     assert table_names(context) == {
         "rooms",
         "devices",
@@ -63,6 +214,9 @@ def test_exactly_seven_tables(context):
         "device_states",
         "audit_logs",
         "config_audit",
+        "scenes",
+        "scene_items",
+        "command_requests",
     }
 
 

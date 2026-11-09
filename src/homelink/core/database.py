@@ -1,6 +1,7 @@
-"""SQLite 连接与重建版最终 DDL。
+"""SQLite 连接与最终 DDL。
 
-SCHEMA_VERSION = 1：一次建到位，不复刻历史迁移，也不继承旧库版本。
+SCHEMA_VERSION = 2：v1 七张业务表保持不变；v2 新增 Agent 侧的场景与命令记录，
+老库按 v1 -> v2 原地补表，不重建设备数据。
 """
 
 from __future__ import annotations
@@ -10,11 +11,45 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_NAME = "homelink"
 
-DDL = """
+AGENT_DDL = """
+CREATE TABLE IF NOT EXISTS scenes (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scene_items (
+    id          TEXT PRIMARY KEY,
+    scene_id    TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    function_id TEXT NOT NULL REFERENCES device_functions(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS command_requests (
+    request_id    TEXT PRIMARY KEY,
+    device_id     TEXT NOT NULL,
+    function_id   TEXT NOT NULL,
+    command       TEXT NOT NULL,
+    parameters    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(parameters)),
+    actor         TEXT NOT NULL DEFAULT 'user'
+                  CHECK (length(trim(actor)) > 0 AND length(actor) <= 64),
+    status        TEXT NOT NULL CHECK (status IN ('running', 'sent', 'failed')),
+    error_code    TEXT,
+    error_message TEXT,
+    trace_id      TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+"""
+
+DDL = (
+    """
 CREATE TABLE rooms (
     name         TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
@@ -87,6 +122,10 @@ CREATE TABLE config_audit (
     created_at TEXT NOT NULL
 );
 
+"""
+    + AGENT_DDL
+    + """
+
 CREATE INDEX idx_devices_room ON devices(room);
 CREATE INDEX idx_device_functions_device ON device_functions(device_id);
 CREATE INDEX idx_ir_codes_function ON ir_codes(function_id, id);
@@ -94,7 +133,10 @@ CREATE INDEX idx_device_states_device ON device_states(device_id, id);
 CREATE INDEX idx_audit_logs_created ON audit_logs(id);
 CREATE INDEX idx_audit_logs_device ON audit_logs(device_id, id);
 CREATE INDEX idx_config_audit_created ON config_audit(id);
+CREATE INDEX idx_scene_items_scene ON scene_items(scene_id, position);
+CREATE INDEX idx_command_requests_device ON command_requests(device_id, created_at);
 """
+)
 
 
 class Database:
@@ -138,15 +180,25 @@ class Database:
             if version == 0:
                 conn.executescript(DDL)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            elif version == 1:
+                self._migrate_v1_to_v2(conn)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(
                     f"数据库 schema 版本为 {version}，与目标 {SCHEMA_VERSION} 不一致；"
-                    "重建版不支持历史迁移，请另写一次性导入脚本"
+                    "只支持 v1 -> v2 原地补表，其余版本请另写一次性迁移脚本"
                 )
             else:
                 self._add_missing_audit_device_id(conn)
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+        """v1 -> v2：只补 Agent 场景与命令记录表，设备/功能/码/状态/审计原样保留。"""
+
+        Database._add_missing_audit_device_id(conn)
+        conn.executescript(AGENT_DDL)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _add_missing_audit_device_id(conn: sqlite3.Connection) -> None:

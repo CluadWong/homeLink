@@ -20,6 +20,7 @@ import httpx
 from homelink.gateway.base import (
     GatewayError,
     GatewayOfflineError,
+    GatewayTimeoutError,
     GatewayUnauthorizedError,
     IRGateway,
     ProbeOutcome,
@@ -73,7 +74,7 @@ class RealIRGateway(IRGateway):
             with self._client(timeout) as client:
                 response = client.request(method, url, **kwargs)
         except httpx.TimeoutException as exc:
-            raise GatewayOfflineError(
+            raise GatewayTimeoutError(
                 f"设备 {self._host()} 无响应（连接超时 {timeout:g}s）。"
                 "请确认板子已上电并连到 Wi-Fi，或核对网关地址。"
             ) from exc

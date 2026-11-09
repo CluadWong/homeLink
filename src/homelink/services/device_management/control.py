@@ -107,4 +107,8 @@ class ControlService:
 def _as_app_error(exc: GatewayError) -> AppError:
     if exc.kind == "unauthorized":
         return AppError(ErrorCode.DEVICE_UNAUTHORIZED, exc.message)
+    if exc.kind == "timeout":
+        return AppError(ErrorCode.GATEWAY_TIMEOUT, exc.message)
+    if exc.kind == "bad_response":
+        return AppError(ErrorCode.EXECUTION_FAILED, exc.message)
     return AppError(ErrorCode.DEVICE_OFFLINE, exc.message)

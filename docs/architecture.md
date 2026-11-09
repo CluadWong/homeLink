@@ -13,12 +13,13 @@
 
 `build_context(config_dir, db_path, gateway_mode)` 是唯一装配入口：
 
-1. `Database.initialize()` —— 重建版直接建最终 DDL，`SCHEMA_VERSION = 1`；无历史迁移链。
+1. `Database.initialize()` —— 重建版直接建最终 DDL，`SCHEMA_VERSION = 2`；v1 库原地补 `scenes` / `scene_items` / `command_requests`，设备与码不重建。
 2. `ConfigService`（挂 `SqliteAuditStore`）→ `build_gateways` / `build_gateway_probe`（按 `mode` 选 mock/real）。
 3. `DeviceStore`（运行期设备）→ `DeviceStateStore` → `AuditSink`。
 4. `build_service_domains` 装配「设备管理」服务域；没有能力注册表，也没有策略引擎。
-5. `sync_config_to_database` 只做房间播种 —— **必须早于任何设备写入**：`devices.room` 引用 `rooms.name`，空表时建设备会失败。
-6. 启动清理 `purge_older_than(90)` / `purge_audit_logs(365)`，失败只告警。状态**不载入内存**，`GET /api/state` 直接读 `device_states` 最新记录，因此重启天然不丢。
+5. `AgentService(devices, states, control, SceneStore(db), CommandRequestStore(db), probe)` —— Agent 粗粒度门面，复用同一批服务域对象，不新开数据通路。
+6. `sync_config_to_database` 只做房间播种 —— **必须早于任何设备写入**：`devices.room` 引用 `rooms.name`，空表时建设备会失败。
+7. 启动清理 `purge_older_than(90)` / `purge_audit_logs(365)`，失败只告警。状态**不载入内存**，`GET /api/state` 直接读 `device_states` 最新记录，因此重启天然不丢。
 
 `AppContext` 是装配结果的数据类，API 与集成测试共用；`pending_base_url` 是唯一的运行期可变字段（`PUT /api/gateway` 写入，重启后自然清空）。
 
@@ -49,7 +50,7 @@
 
 | 面 | 形态 | 用途 | 是否契约 |
 | --- | --- | --- | --- |
-| HTTP API | 21 个端点 | 唯一程序化入口 | 是，见 `api-contract.md` |
+| HTTP API | 33 个端点（旧 21 + Agent 12） | 唯一程序化入口 | 是，见 `api-contract.md` |
 | 配置目录 | `settings*.yaml`、`devices.yaml`（仅房间种子） | 部署期输入 | 是 |
 | 数据目录 | 一个 SQLite 文件 | 持久化 | 否，外部不得直连 |
 
@@ -62,9 +63,10 @@ src/homelink/
   core/         配置服务、SQLite、时间工具 —— 无业务
   gateway/      IRGateway 抽象、mock/real、探测缓存
   brain/        审计落点（AuditSink）；策略引擎已删除
-  services/device_management/  唯一服务域：设备 / 房间 / 功能 / 码 / 状态 / 学码
+  services/device_management/  设备域：设备 / 房间 / 功能 / 码 / 状态 / 学码
+  services/agent/             Agent 门面：设备模型、场景、命令记录（复用设备域，不新开数据通路）
   bootstrap/    对象图装配、房间播种、保留期清理
-  interface/api/  router，见 `api-contract.md`
+  interface/api/  router，见 `api-contract.md`（`/api/*` 旧端点 + `/api/agent/*` 粗粒度端点）
   interface/clients/streamlit/  过渡客户端
   agent_future/ 已停用，禁止引用
 config/          settings / devices（房间种子）+ *.local.yaml
@@ -77,10 +79,11 @@ hardware/ir-codes/  设备侧历史归档，不作为数据源
 
 - **ADR-01 网关抽象**：硬件差异收敛在 `IRGateway`，mock/real 可互换；新增硬件只加实现。
 - **ADR-02 功能即调用单元**：没有内置功能、能力与参数；`function_id` 是唯一调用入口，一次调用回放一条学码。
-- **ADR-03 单服务域**：不为多域提前抽象；内核不持有任何设备名。
+- **ADR-03 单服务域**：业务状态只有设备域一处；`services/agent` 是门面而非第二服务域，不为多域提前抽象，内核不持有任何设备名。
 - **ADR-04 状态只追加**：`device_states` 是事件流，读取取最新；来源只有 `unknown` / `confirmed`。
 - **ADR-05 配置写入唯一入口**：必须经 `ConfigService`，否则并发写坏文件且 `config_audit` 断链。
 - **ADR-06 学码复用设备**：设备由设备页创建，`start` 只开会话；`cancel` 与 TTL 只停接收态，不增删设备。
+- **ADR-07 Agent 粗粒度命名空间**：`/api/agent/*` 是面向 Agent 的门面，端点少、参数少、统一 envelope；旧 `/api/*` 原样保留给前端与脚本，二者共用同一批服务对象，不存在第二套状态机。
 
 ## 6. 失败隔离
 

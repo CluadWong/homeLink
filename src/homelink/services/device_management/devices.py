@@ -126,6 +126,21 @@ class DeviceStore:
             )
         return self.get(device_id)
 
+    def update_extra(self, device_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        """仅更新 `extra` 中的 Agent 元数据（type / aliases / risk_level）。"""
+
+        with self._db.transaction() as conn:
+            row = conn.execute("SELECT extra FROM devices WHERE id = ?", (device_id,)).fetchone()
+            if row is None:
+                raise AppError(ErrorCode.NOT_FOUND, f"设备 {device_id} 不存在")
+            extra = json.loads(row["extra"] or "{}")
+            extra.update(updates)
+            conn.execute(
+                "UPDATE devices SET extra = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(extra, ensure_ascii=False), utc_now_iso(), device_id),
+            )
+        return self.get(device_id)
+
     def delete(self, device_id: str) -> dict[str, Any]:
         with self._db.transaction() as conn:
             if conn.execute("SELECT 1 FROM devices WHERE id = ?", (device_id,)).fetchone() is None:

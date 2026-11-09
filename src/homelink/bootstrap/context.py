@@ -14,6 +14,8 @@ from homelink.core.timeutil import utc_now_iso
 from homelink.gateway.base import IRGateway
 from homelink.gateway.factory import build_gateway, build_gateway_probe
 from homelink.gateway.probe import GatewayProbe
+from homelink.services.agent.service import AgentService
+from homelink.services.agent.store import CommandRequestStore, SceneStore
 from homelink.services.device_management.control import ControlService
 from homelink.services.device_management.devices import DeviceStore
 from homelink.services.device_management.learn import (
@@ -38,6 +40,7 @@ class AppContext:
     learn: LearnService
     states: DeviceStateStore
     control: ControlService
+    agent: AgentService
     # `PUT /api/gateway` 已落盘、但尚待重启生效的地址；进程重启后自然清空。
     pending_base_url: str | None = None
 
@@ -68,6 +71,14 @@ def build_context(
     audit = AuditStore(db)
     states = DeviceStateStore(db)
     control = ControlService(devices, gateway, audit, states)
+    agent = AgentService(
+        devices,
+        states,
+        control,
+        SceneStore(db),
+        CommandRequestStore(db),
+        probe,
+    )
     learn = LearnService(
         devices,
         gateway,
@@ -86,6 +97,7 @@ def build_context(
         learn=learn,
         states=states,
         control=control,
+        agent=agent,
     )
 
 

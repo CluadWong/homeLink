@@ -1,4 +1,4 @@
-"""对外错误码（重建版全表 7 个，见 docs/api-contract.md）。"""
+"""对外错误码（见 docs/api-contract.md）。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,10 @@ class ErrorCode(StrEnum):
     CONFLICT = "CONFLICT"
     DEVICE_OFFLINE = "DEVICE_OFFLINE"
     DEVICE_UNAUTHORIZED = "DEVICE_UNAUTHORIZED"
+    GATEWAY_TIMEOUT = "GATEWAY_TIMEOUT"
+    EXECUTION_FAILED = "EXECUTION_FAILED"
+    CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
+    NOT_SUPPORTED = "NOT_SUPPORTED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -22,6 +26,10 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.CONFLICT: 409,
     ErrorCode.DEVICE_OFFLINE: 503,
     ErrorCode.DEVICE_UNAUTHORIZED: 401,
+    ErrorCode.GATEWAY_TIMEOUT: 504,
+    ErrorCode.EXECUTION_FAILED: 502,
+    ErrorCode.CONFIRMATION_REQUIRED: 409,
+    ErrorCode.NOT_SUPPORTED: 501,
     ErrorCode.INTERNAL_ERROR: 500,
 }
 

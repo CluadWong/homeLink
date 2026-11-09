@@ -11,7 +11,7 @@ def test_health(client):
     body = response.json()
     assert body["success"] is True
     assert body["status"] == "ok"
-    assert body["schema_version"] == 1
+    assert body["schema_version"] == 2
     assert body["trace_id"]
 
 

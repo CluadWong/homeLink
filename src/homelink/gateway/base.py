@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-GatewayFailure = Literal["unreachable", "unauthorized", "bad_response"]
+GatewayFailure = Literal["unreachable", "unauthorized", "bad_response", "timeout"]
 
 
 class GatewayError(Exception):
@@ -27,6 +27,13 @@ class GatewayOfflineError(GatewayError):
 
     def __init__(self, message: str) -> None:
         super().__init__("unreachable", message)
+
+
+class GatewayTimeoutError(GatewayOfflineError):
+    """设备能连上但请求超时；旧链路仍按离线处理，Agent 链路单独区分。"""
+
+    def __init__(self, message: str) -> None:
+        GatewayError.__init__(self, "timeout", message)
 
 
 class GatewayUnauthorizedError(GatewayError):

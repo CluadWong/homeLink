@@ -2,7 +2,7 @@
 
 ## 1. 目标 schema（重建版）
 
-重建版只建这 7 张表，`SCHEMA_VERSION = 1`，最终 DDL 一次到位。没有内置功能，也就没有任何能力、参数或策略相关的表与列。
+重建版共 10 张表，`SCHEMA_VERSION = 2`：v1 七张业务表保持不变，v2 新增 Agent 场景与命令记录。没有内置功能，也没有能力、参数或策略表。
 
 | 表 | 列 |
 | --- | --- |
@@ -13,15 +13,21 @@
 | `device_states` | `id`、`device_id`(FK)、`state`、`state_source` CHECK(`unknown`/`confirmed`)、`reason`、`trace_id`、`created_at` |
 | `audit_logs` | `id`、`who` CHECK(`user`/`system`)、`action`、`device_id`(可空)、`context`、`reason`、`level` 默认 `'low'`、`result` CHECK(`success`/`failed`)、`trace_id`、`created_at` |
 | `config_audit` | `id`、`file`、`key_path`、`old_value`、`new_value`、`who` CHECK(`user`/`system`)、`source` CHECK(`startup`/`api`)、`result` CHECK(`applied`/`rejected`/`rolled_back`)、`error`、`trace_id`、`created_at` |
+| `scenes` | `id`(PK)、`name` UNIQUE（1–40 字符）、`created_at` |
+| `scene_items` | `id`(PK)、`scene_id`(FK→scenes，级联删)、`device_id`(FK→devices，级联删)、`function_id`(FK→device_functions，级联删)、`position`、`created_at` |
+| `command_requests` | `request_id`(PK)、`device_id`、`function_id`、`command`、`parameters` JSON、`actor`(1–64)、`status` CHECK(`running`/`sent`/`failed`)、`error_code`、`error_message`、`trace_id`、`created_at`、`updated_at` |
 
 关系：
 
 ```
 rooms 1──n devices 1──n device_functions 1──n ir_codes
-                  └──n device_states
+                  ├──n device_states
+                  └──n scene_items n──1 scenes
+command_requests 独立留存，不随设备删除
 ```
 
 - `device_functions` **只存学码功能**，字段只有 id / device_id / name / 时间戳；没有 `action`、`params_schema`、`risk_level`、`kind`。
+- `devices.extra` 可存 Agent 元数据 `type` / `aliases` / `risk_level`，只影响描述与确认策略，不改变控制语义。
 - `devices` 没有 `capability`、`source`、`enabled`、`state/state_source/state_updated_at`：设备一律运行期创建，状态只来自 `device_states`。
 - `ir_codes` 冗余 `device_id`：删设备时一次级联清干净，回放不必 join 功能表。
 
@@ -78,8 +84,8 @@ POST /api/learn/start {device_id} ──▶ 只开会话，不创建、不修改
 
 ## 6. Schema、迁移与保留
 
-- `SCHEMA_VERSION = 1`：重建版**直接建最终 DDL**，不复刻历史迁移，也不继承现有库的 v10。
-- 如需沿用旧库数据：另写**一次性导入脚本**，按新 schema 映射（旧 `devices` 的 `capability`/`source`/`enabled`/三列状态丢弃；旧 `device_functions` 只留 learned 行并去掉动作/参数/风险列）。导入不在启动流程里。
+- `SCHEMA_VERSION = 2`：v1 直接建最终 DDL；老库 v1 启动时原地补 `scenes` / `scene_items` / `command_requests` 三张表，设备、功能、码、状态、审计数据原样保留。
+- 如需从更老的库迁移：另写**一次性导入脚本**，按新 schema 映射（旧 `devices` 的 `capability`/`source`/`enabled`/三列状态丢弃；旧 `device_functions` 只留 learned 行并去掉动作/参数/风险列）。导入不在启动流程里。
 - 保留期启动时清理：`device_states` 90 天（`state.retention_days`），`audit_logs` 365 天（`audit.retention_days`）。
 - `ir_codes` 不按时间清理，按功能保留最近 3 条（按 `rowid` 倒序）；`config_audit` 不清理。
 - 清理只按 `created_at < cutoff`；清理失败只告警，不阻断启动。

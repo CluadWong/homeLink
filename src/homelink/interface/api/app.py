@@ -21,6 +21,7 @@ from homelink.core.config import ConfigError
 from homelink.core.errors import AppError, ErrorCode
 from homelink.interface.api.errors import register_exception_handlers
 from homelink.interface.api.routers import (
+    agent,
     audit,
     control,
     correct,
@@ -62,6 +63,7 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(correct.router)
     app.include_router(gateway.router)
     app.include_router(audit.router)
+    app.include_router(agent.router)
     _register_frontend(app, context)
     return app
 

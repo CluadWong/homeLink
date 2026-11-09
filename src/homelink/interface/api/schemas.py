@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -151,3 +152,71 @@ class GatewayBaseUrlRequest(_StrictBody):
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise ValueError("必须是带 host 的 http/https 地址")
         return text
+
+
+class AgentControlRequest(_StrictBody):
+    device_id: str
+    command: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    request_id: str = Field(min_length=1, max_length=64)
+    confirm: bool = False
+
+    @field_validator("device_id", "command", "request_id")
+    @classmethod
+    def _non_empty(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("不能为空")
+        return text
+
+
+class AgentSceneItem(_StrictBody):
+    device_id: str
+    command: str
+
+    @field_validator("device_id", "command")
+    @classmethod
+    def _non_empty(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("不能为空")
+        return text
+
+
+class AgentSceneCreateRequest(_StrictBody):
+    name: str = Field(min_length=1, max_length=40)
+    items: list[AgentSceneItem] = Field(min_length=1, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("不能为空")
+        return text
+
+
+class AgentMetadataRequest(_StrictBody):
+    type: str | None = Field(default=None, max_length=32)
+    aliases: list[str] | None = Field(default=None, max_length=20)
+    risk_level: Literal["low", "high"] | None = None
+
+    @field_validator("type")
+    @classmethod
+    def _type_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        text = value.strip()
+        if not text:
+            raise ValueError("不能为空")
+        return text
+
+    @field_validator("aliases")
+    @classmethod
+    def _aliases_valid(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
+        cleaned = [item.strip() for item in value if item.strip()]
+        if any(len(item) > 40 for item in cleaned):
+            raise ValueError("单个别名不能超过 40 个字符")
+        return cleaned

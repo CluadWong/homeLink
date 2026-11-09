@@ -22,9 +22,12 @@
 | 400 | 请求体字段缺失、未声明字段（`INVALID_REQUEST`） |
 | 401 | `UNAUTHORIZED`（前端 token）或 `DEVICE_UNAUTHORIZED`（板子拒绝凭证） |
 | 404 | `NOT_FOUND`（设备、房间、功能或码不存在） |
-| 409 | `CONFLICT`（房间重名、非空房间删除） |
+| 409 | `CONFLICT`（房间重名、非空房间、request_id 复用）或 `CONFIRMATION_REQUIRED`（高风险设备未确认） |
 | 500 | `INTERNAL_ERROR`（不回栈） |
-| 503 | `DEVICE_OFFLINE`（发送/学码时连接失败或超时） |
+| 501 | `NOT_SUPPORTED`（自动化规则） |
+| 502 | `EXECUTION_FAILED`（网关返回异常响应） |
+| 503 | `DEVICE_OFFLINE`（发送/学码时连接失败） |
+| 504 | `GATEWAY_TIMEOUT`（连接超时） |
 
 ### 错误码全表（重建版）
 
@@ -33,14 +36,18 @@
 | `INVALID_REQUEST` | 400 | 请求体字段缺失或出现未声明字段 |
 | `UNAUTHORIZED` | 401 | 前端 token 缺失或不匹配 |
 | `NOT_FOUND` | 404 | 设备 / 房间 / 功能 / 码不存在 |
-| `CONFLICT` | 409 | 房间重名 / 非空房间 |
-| `DEVICE_OFFLINE` | 503 | 设备无响应 / 连接失败 / 超时 |
+| `CONFLICT` | 409 | 房间重名 / 非空房间 / request_id 已用于其他命令 |
+| `DEVICE_OFFLINE` | 503 | 设备无响应 / 连接失败 |
 | `DEVICE_UNAUTHORIZED` | 401 | 板子在线但鉴权被拒 |
+| `GATEWAY_TIMEOUT` | 504 | 连接超时 |
+| `EXECUTION_FAILED` | 502 | 网关返回无法识别的响应 |
+| `CONFIRMATION_REQUIRED` | 409 | 高风险设备未带 confirm=true |
+| `NOT_SUPPORTED` | 501 | 自动化规则本期不支持 |
 | `INTERNAL_ERROR` | 500 | 内部错误 |
 
 重建版清退 `POLICY_DENIED`、`FORBIDDEN`、`TIMEOUT`、`MODEL_UNAVAILABLE`、`FALLBACK_EXHAUSTED`、`REDACT_FAILED`、`BUDGET_EXCEEDED`、`P3_NOT_ALLOWED`；**当前代码仍保留这些码**，重建时一次删掉。
 
-**`AGENT_UNREACHABLE` 是客户端展示码，不属于上表 7 个服务端错误码**：服务端从不返回、也不接受请求携带该值；前端仅在请求未到达后端（网络不可达、超时）时本地生成，用于与 `DEVICE_OFFLINE`（后端正常、板子不通）区分。
+**`AGENT_UNREACHABLE` 是客户端展示码，不属于上表 11 个服务端错误码**：服务端从不返回、也不接受请求携带该值；前端仅在请求未到达后端（网络不可达、超时）时本地生成，用于与 `DEVICE_OFFLINE`（后端正常、板子不通）区分。
 
 ### 1.1 静态托管（同源）
 
@@ -52,7 +59,7 @@
 - 开启但缺 `dist/index.html`：启动日志打 WARNING，非 API 路径返回 **503 纯文本**「前端未构建…请先 `npm run build`」，`/api` 不受影响（**不是 500**）。
 - 生产**不使用 Vite dev server**：页面与 API 同源同端口，构建产物由后端直接提供；静态页面与 `/docs` 不受 token 约束。
 
-## 2. 端点清单（21 个）
+## 2. 端点清单（33 个）
 
 ### 2.1 健康检查
 
@@ -134,6 +141,37 @@
 成功：`{records:[{created_at,action,device_id,result,reason,trace_id}], trace_id}`。
 `limit` 1–200（默认 50）；`result` 三值 `success` / `failed` / `all`（`all` 或缺省表示不筛选）；`device_id` 按 `audit_logs.device_id` **精确匹配**（空值记录不参与）。非法 → 400。
 
+### 2.10 Agent 能力（12）
+
+前缀 `/api/agent`，成功统一返回 `{success, result, trace_id}`。请求头可选 `X-Actor`（≤ 64 字符，默认 `user`），只用于记录调用方，不参与鉴权。
+
+| 能力 | 端点 |
+| --- | --- |
+| 查设备 | `GET /api/agent/devices?room=&type=&name=` |
+| 查单个设备 | `GET /api/agent/devices/{device_id}` |
+| 查状态 | `GET /api/agent/devices/{device_id}/state` |
+| 家庭快照 | `GET /api/agent/snapshot?room=` |
+| 控设备 | `POST /api/agent/control` |
+| 查命令结果 | `GET /api/agent/commands/{request_id}` |
+| 场景列表 | `GET /api/agent/scenes` |
+| 创建场景 | `POST /api/agent/scenes` |
+| 删除场景 | `DELETE /api/agent/scenes/{scene_id}` |
+| 跑场景 | `POST /api/agent/scenes/{scene_id}/run` |
+| 设备元数据 | `PUT /api/agent/devices/{device_id}/metadata` |
+| 自动化（未支持） | `POST /api/agent/automations` → 501 |
+
+- 设备模型：`device_id / type / room / name / aliases / risk_level / online / online_scope / capabilities / state / state_source / state_updated_at / state_readback`。
+- `online` 取网关探测结果，同一网关下所有设备一致，`online_scope` 恒为 `gateway`；不承诺逐设备在线。
+- `capabilities` 只列已学码功能，形状 `{command, command_id, parameters:{}}`；红外一条码即一个完整动作，**不支持连续参数**。
+- `state` 是虚拟状态：控制成功写 `unknown`，只有校正可写 `confirmed`；`state_readback` 恒为 `false`。
+- `type / aliases / risk_level` 存于 `devices.extra`；`type` 缺省按设备名推断，`risk_level` 缺省按类型推断（取暖器/烤箱/门锁/燃气为 `high`）。
+- `control`：`command` 可传 `command_id` 或功能名（精确匹配）；`parameters` 必须为空对象；`request_id` 1–64 字符，作为幂等键。
+- 同一 `request_id` 重放：原命令成功 → 200 且 `replayed=true`；原命令失败 → 返回原错误码；`device_id/function_id/parameters` 不一致 → 409 `CONFLICT`。
+- 高风险设备未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`；Agent 必须先复述并取得用户确认。
+- 网关不可达 → 503 `DEVICE_OFFLINE` 且命令记为 `failed`；超时 → 504；网关响应异常 → 502。
+- 场景：`items` 1–20 条，创建时即解析功能；运行逐条发送并返回 `results`，整体 `status` 为 `sent / partial / failed`。场景不引入触发条件与调度。
+- 自动化规则本期不实现，固定 501 `NOT_SUPPORTED`。
+
 ## 3. 学码契约
 
 - 设备由设备页（`POST /api/devices`）创建；`start` 只在已有设备上开会话，不创建、不修改设备。
@@ -151,7 +189,7 @@
 - `function_id` 必填且唯一寻址；设备由功能归属推出。出现 `device_id`、`action`、`params` 一律按未声明字段 400。
 - 调用只做一件事：取该功能最新一条码并经 `ir_proxy_tx` 回放；没有参数、没有能力校验、没有越界判断。
 - 功能不存在 → 404；功能存在但没有任何码 → 404（文案说明「该功能还没有可用码」）。
-- 回放成功只代表「信号已发出」，状态写 `unknown`；连接失败 → 503 `DEVICE_OFFLINE`；探测结果**不参与**控制前置判断。
+- 回放成功只代表「信号已发出」，状态写 `unknown`；连接失败 → 503 `DEVICE_OFFLINE`，超时 → 504 `GATEWAY_TIMEOUT`，网关响应异常 → 502 `EXECUTION_FAILED`；探测结果**不参与**控制前置判断。
 - 成功与失败都写 `audit_logs`（`who=user`），没有策略拒绝分支。
 
 ## 5. 演进规则
