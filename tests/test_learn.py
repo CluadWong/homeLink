@@ -353,9 +353,7 @@ def test_save_stop_failure_ends_session_but_cancel_retries(build_client):
 
     assert body["receiver_stopped"] is False
     assert "无响应" in body["receiver_error"]
-    assert (
-        client.get("/api/learn/capture", params={"device_id": device["id"]}).status_code == 404
-    )
+    assert client.get("/api/learn/capture", params={"device_id": device["id"]}).status_code == 404
 
     cancel = client.post("/api/learn/cancel", json={"device_id": device["id"]})
     assert cancel.status_code == 200

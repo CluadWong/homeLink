@@ -101,7 +101,7 @@ def _render_create_form(client: AgentClient) -> None:
             format_func=lambda value: device_map.get(value, value),
             key="learn_target_device",
         )
-        name = st.text_input("功能名", placeholder="开机", maxlength=40, key="learn_function_name")
+        name = st.text_input("功能名", placeholder="开机", max_chars=40, key="learn_function_name")
         submitted = st.form_submit_button(
             "开始学码",
             type="primary",

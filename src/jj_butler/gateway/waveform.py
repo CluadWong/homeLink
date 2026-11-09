@@ -72,9 +72,7 @@ def decode_waveform(text: str) -> list[int]:
     if not values:
         raise WaveformEmptyError("波形数组为空")
     if len(values) < MIN_WAVEFORM_SEGMENTS:
-        raise WaveformLengthError(
-            f"只收到 {len(values)} 段，至少需要 {MIN_WAVEFORM_SEGMENTS} 段"
-        )
+        raise WaveformLengthError(f"只收到 {len(values)} 段，至少需要 {MIN_WAVEFORM_SEGMENTS} 段")
     return values
 
 
