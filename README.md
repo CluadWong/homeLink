@@ -20,6 +20,27 @@ uvicorn jj_butler.interface.api.app:app --host 0.0.0.0 --port 8000
 - 一键启动：`python scripts/start.py`（只拉起 uvicorn，日志写 `logs/backend.log`，Ctrl+C 不留孤儿进程）。
 - 离开本仓库运行时，用环境变量 `JJ_BUTLER_CONFIG_DIR`（配置目录）与 `JJ_BUTLER_DB_PATH`（SQLite 文件）指定路径。
 
+### 开机自启与查看地址
+
+开机自启由 Windows 计划任务实现，**安装 / 卸载都需要管理员权限**（各执行一次）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
+powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
+```
+
+安装后有两个任务：
+
+| 任务 | 触发 | 行为 |
+| --- | --- | --- |
+| `JJButler2Service` | 开机（以 SYSTEM 运行，无需登录） | 后台静默执行 `scripts\service\run-service.cmd`，启动输出含访问地址，写 `logs\service.log` |
+| `JJButler2Addresses` | 用户登录 | 弹出终端执行 `scripts\service\show-addresses.cmd`，只显示当前访问地址，不重复启动服务 |
+
+- 安装脚本会**停用**旧项目的 `JJButlerService`（只停用不删除）；不想动旧任务时加 `-KeepOldService`。
+- 卸载后旧任务保持停用；需要恢复时执行 `uninstall-service.ps1 -RestoreOldService`。
+- 只想立刻看地址：运行 `scripts\service\show-addresses.cmd`（或 `python scripts\addresses.py`）。
+
+
 ## 配置
 
 配置目录默认是仓库根的 `config/`：
