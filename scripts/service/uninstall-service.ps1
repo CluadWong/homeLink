@@ -1,4 +1,4 @@
-﻿# 卸载 HomeLink开机自启（需要管理员权限）。
+﻿# 卸载 HomeLink 开机自启（需要管理员权限）。
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 #

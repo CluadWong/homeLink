@@ -1,4 +1,4 @@
-﻿# 安装 HomeLink开机自启（需要管理员权限）。
+﻿# 安装 HomeLink 开机自启（需要管理员权限）。
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
 #

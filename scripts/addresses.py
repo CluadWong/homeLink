@@ -42,7 +42,7 @@ def format_addresses(
     """拼出终端展示用的地址行；纯函数，便于测试。"""
 
     addresses = launcher.derive_addresses(host, lan_host, api_port)
-    lines = ["HomeLink已就绪。" if ready else "HomeLink尚未就绪（可能仍在启动）。"]
+    lines = ["HomeLink 已就绪。" if ready else "HomeLink 尚未就绪（可能仍在启动）。"]
     if not ready and reason:
         lines.append(f"  原因：{reason}")
     lines.append("")
@@ -71,7 +71,7 @@ def format_addresses(
 
 def main(argv: list[str] | None = None) -> int:
     launcher.ensure_utf8_output()
-    parser = argparse.ArgumentParser(description="显示 HomeLink访问地址（不启动服务）")
+    parser = argparse.ArgumentParser(description="显示 HomeLink 访问地址（不启动服务）")
     parser.add_argument("--host", default=launcher.DEFAULT_HOST)
     parser.add_argument("--api-port", type=int, default=launcher.DEFAULT_API_PORT)
     parser.add_argument("--wait-seconds", type=float, default=DEFAULT_WAIT_SECONDS)

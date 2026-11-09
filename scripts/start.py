@@ -278,7 +278,7 @@ def _print_addresses(host: str, api_port: int, token: str, *, dist_ready: bool, 
 
 def main(argv: list[str] | None = None) -> int:
     ensure_utf8_output()
-    parser = argparse.ArgumentParser(description="启动 HomeLink后端（前端同源托管）")
+    parser = argparse.ArgumentParser(description="启动 HomeLink 后端（前端同源托管）")
     parser.add_argument("--host", default=DEFAULT_HOST, help="监听地址，默认 0.0.0.0（允许局域网）")
     parser.add_argument("--api-port", type=int, default=DEFAULT_API_PORT)
     parser.add_argument(
