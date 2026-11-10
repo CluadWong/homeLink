@@ -94,4 +94,5 @@ python_functions = ["test_*"]
 addopts = "-q --strict-markers"
 markers = [
   "hardware: 需要真实硬件的用例（默认不跑）",
+  "integration: 需要子进程与本机回环端口的端到端用例（mock 网关，可进 CI）",
 ]
