@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,10 +21,10 @@ from mcp import ClientSession
 
 
 def _settings(**overrides: Any) -> AgentSettings:
-    # daemon_token 默认清空，避免宿主机环境变量影响测试；鉴权用例显式传入
+    # 审计与 token 默认关闭/清空，避免宿主机环境变量影响测试；相关用例显式传入
     return replace(
         load_settings(),
-        audit_path="off",
+        audit_path=overrides.pop("audit_path", "off"),
         daemon_token=overrides.pop("daemon_token", ""),
         **overrides,
     )
@@ -348,3 +350,40 @@ def test_queue_waits_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     assert second.status_code == 200  # 排队等到锁，正常执行
     assert second.json()["reply"] == "慢"
     assert executed == 2
+
+
+# ---------------------------------------------------------------- 优雅退出
+
+
+def _audit_events(path: Path) -> list[dict[str, Any]]:
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+
+
+def test_shutdown_audits_and_clears_sessions(
+    fake_chat: list[list[dict[str, Any]]], tmp_path: Path
+) -> None:
+    audit_file = tmp_path / "audit.jsonl"
+
+    with _client(FakeConnection(), settings=_settings(audit_path=str(audit_file))) as client:
+        assert client.post("/api/chat", json={"message": "hi"}).status_code == 200
+
+    shutdown = [r for r in _audit_events(audit_file) if r["event"] == "shutdown"]
+    assert len(shutdown) == 1
+    assert shutdown[0]["sessions"] == 1  # 记录清空前的会话数
+    assert shutdown[0]["mcp_connected"] is True  # 注入连接由测试自行管理
+
+
+def test_shutdown_stops_own_mcp_subprocess(tmp_path: Path) -> None:
+    """own 连接（真实 McpConnection）：退出时收掉 stdio 子进程，不留孤儿。"""
+
+    audit_file = tmp_path / "audit.jsonl"
+    app = create_agent_app(_settings(audit_path=str(audit_file)), warmup=False)
+
+    with TestClient(app):
+        pass  # 启动会拉起真实 homelink_mcp 子进程，退出时必须收掉
+
+    shutdown = [r for r in _audit_events(audit_file) if r["event"] == "shutdown"]
+    assert len(shutdown) == 1
+    assert shutdown[0]["mcp_connected"] is False  # 子进程已关闭

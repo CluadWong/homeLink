@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import RequestResponseEndpoint
 
 from homelink_agent.agent import HomeAgent
+from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings, load_settings
 from homelink_agent.llm import OllamaError, to_ollama_tool, warm_model
 from homelink_mcp.config import DEFAULT_ACTOR
@@ -195,6 +196,11 @@ class SessionStore:
     def drop(self, session_id: str) -> bool:
         return self._items.pop(session_id, None) is not None
 
+    def clear(self) -> None:
+        """退出时清空全部会话（含未完成的高风险确认状态）。"""
+
+        self._items.clear()
+
     def evict_expired(self) -> None:
         deadline = time.time() - self._settings.session_ttl_min * 60
         while self._items:
@@ -220,9 +226,19 @@ def create_agent_app(
                     await warm_model(settings)
                 except OllamaError as exc:  # 预热失败不拦启动，首轮提问会给出同样报错
                     print(f"警告：{exc}", file=sys.stderr, flush=True)
-        yield
-        if own_connection:
-            await conn.stop()
+        try:
+            yield
+        finally:
+            # 优雅退出（SIGTERM / Ctrl+C 走 uvicorn 的 lifespan shutdown）：
+            # 会话存储直接清空（确认状态随进程结束，绝不跨重启保留高风险授权），
+            # 再关 MCP 子进程与其内部 HTTP 连接池。
+            sessions = len(store)
+            store.clear()
+            if own_connection:
+                await conn.stop()
+            AuditLog(settings.audit_path).write(
+                "shutdown", sessions=sessions, mcp_connected=conn.connected
+            )
 
     app = FastAPI(title="HomeLink Agent Daemon", lifespan=lifespan)
     own_connection = connection is None
