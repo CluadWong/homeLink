@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from mcp import ClientSession
 
 from homelink_agent import agent as agent_mod
 from homelink_agent.config import AgentSettings, load_settings
-from homelink_agent.daemon import McpConnection, SessionStore, create_agent_app
+from homelink_agent.daemon import McpConnection, Metrics, SessionStore, create_agent_app
 from homelink_agent.llm import OllamaError
+from mcp import ClientSession
 
 
 def _settings(**overrides: Any) -> AgentSettings:
@@ -150,3 +151,111 @@ def test_history_is_capped() -> None:
 
     assert len(history) == 20
     assert history[0]["content"] == "20"  # 只留最近 10 轮（u20..a29）
+
+
+# ---------------------------------------------------------------- /api/metrics
+
+
+class _FakeToolResult:
+    def __init__(self) -> None:
+        block = SimpleNamespace(type="text", text="ok")
+        self.content: list[Any] = [block]
+        self.isError = False
+
+
+class ToolSessionStub:
+    """记录调用次数的最小 ClientSession 替身。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> _FakeToolResult:
+        self.calls += 1
+        return _FakeToolResult()
+
+
+class ToolFakeConnection(FakeConnection):
+    """session 换成可记录 call_tool 的替身。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.session = ToolSessionStub()  # type: ignore[assignment]
+
+
+def test_metrics_counters_after_three_chats(
+    fake_chat: list[list[dict[str, Any]]],
+) -> None:
+    with _client(FakeConnection()) as client:
+        for index in range(3):
+            response = client.post("/api/chat", json={"message": f"问题{index}"})
+            assert response.status_code == 200
+
+        body = client.get("/api/metrics").json()
+
+    assert body["requests_total"] == 3
+    assert body["errors_total"] == 0
+    assert body["tool_calls_total"] == 0
+    assert body["latency_ms"]["p50"] is not None
+    assert body["latency_ms"]["p95"] >= body["latency_ms"]["p50"]
+    assert body["sessions"] >= 1
+    assert body["mcp_connected"] is True
+    assert "问题" not in str(body)  # 不泄露用户输入
+
+
+def test_metrics_counts_errors_on_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def broken_chat(
+        settings: AgentSettings,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        raise OllamaError("连不上 Ollama")
+
+    monkeypatch.setattr(agent_mod, "chat", broken_chat)
+
+    with _client(FakeConnection()) as client:
+        client.post("/api/chat", json={"message": "你好"})
+        body = client.get("/api/metrics").json()
+
+    assert body["requests_total"] == 1
+    assert body["errors_total"] == 1
+
+
+def test_metrics_counts_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """带工具调用的轮次：tool_calls_total 按 on_tool 回调计数。"""
+
+    async def chatting_chat(
+        settings: AgentSettings,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if any("tool_calls" in item for item in messages):
+            return {"content": "已查完"}
+        return {
+            "tool_calls": [
+                {"function": {"name": "home_find_devices", "arguments": {}}},
+            ]
+        }
+
+    monkeypatch.setattr(agent_mod, "chat", chatting_chat)
+
+    with _client(ToolFakeConnection()) as client:
+        response = client.post("/api/chat", json={"message": "家里有哪些设备"})
+        assert response.status_code == 200
+
+        body = client.get("/api/metrics").json()
+
+    assert body["tool_calls_total"] == 1
+    assert body["requests_total"] == 1
+
+
+def test_metrics_percentile_and_sample_cap() -> None:
+    metrics = Metrics(max_latency_samples=3)
+    for latency in (10.0, 20.0, 30.0, 40.0):  # 40 挤掉 10
+        metrics.record_request(error=False, latency_ms=latency)
+
+    assert metrics.percentile(50) == 30.0  # 最近秩：ceil(0.5*3)=2 → 第 2 小
+    assert metrics.percentile(95) == 40.0  # ceil(0.95*3)=3 → 最大
+    assert metrics.requests_total == 4
+    assert metrics.errors_total == 0
+
+    assert Metrics().percentile(50) is None  # 无样本返回 None

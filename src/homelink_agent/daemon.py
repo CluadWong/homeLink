@@ -12,6 +12,7 @@
 接口：
     POST /api/chat            {"message": "...", "session_id": "..."} → {"reply", "session_id"}
     GET  /api/health          连接、模型、会话数
+    GET  /api/metrics         进程内计数：请求数 / 错误数 / 工具调用数 / 耗时分位
     DELETE /api/sessions/{id} 主动丢弃会话（含未完成的高风险确认）
 """
 
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import os
 import sys
 import time
@@ -29,7 +31,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from pydantic import BaseModel, Field
 
@@ -37,8 +38,13 @@ from homelink_agent.agent import HomeAgent
 from homelink_agent.config import AgentSettings, load_settings
 from homelink_agent.llm import OllamaError, to_ollama_tool, warm_model
 from homelink_mcp.config import DEFAULT_ACTOR
+from mcp import ClientSession, StdioServerParameters
 
 _HISTORY_CAP = 20  # 保留最近 10 轮，防止上下文无限膨胀
+
+
+def _elapsed_ms(started: float) -> float:
+    return (time.perf_counter() - started) * 1000
 
 
 class ChatRequest(BaseModel):
@@ -115,11 +121,54 @@ class McpConnection:
         return env
 
 
+class Metrics:
+    """进程内计数（P1-6）：只读输出给 /api/metrics，不引入 Prometheus。
+
+    只记次数与耗时，不记消息内容，天然不泄露用户输入。
+    """
+
+    def __init__(self, *, max_latency_samples: int = 1000) -> None:
+        self.requests_total = 0
+        self.errors_total = 0
+        self.tool_calls_total = 0
+        self._latencies_ms: list[float] = []
+        self._max_samples = max_latency_samples
+
+    def on_tool(self, name: str, arguments: dict[str, Any], text: str) -> None:
+        """HomeAgent 的 on_tool 回调签名；只计数，不落内容。"""
+        self.tool_calls_total += 1
+
+    def record_request(self, *, error: bool, latency_ms: float) -> None:
+        self.requests_total += 1
+        if error:
+            self.errors_total += 1
+        self._latencies_ms.append(round(latency_ms, 1))
+        if len(self._latencies_ms) > self._max_samples:  # 只留最近 N 个样本
+            del self._latencies_ms[: len(self._latencies_ms) - self._max_samples]
+
+    def percentile(self, pct: float) -> float | None:
+        """最近秩百分位；无样本返回 None。"""
+        if not self._latencies_ms:
+            return None
+        ordered = sorted(self._latencies_ms)
+        rank = max(1, math.ceil(pct / 100 * len(ordered)))
+        return ordered[min(rank, len(ordered)) - 1]
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "requests_total": self.requests_total,
+            "errors_total": self.errors_total,
+            "tool_calls_total": self.tool_calls_total,
+            "latency_ms": {"p50": self.percentile(50), "p95": self.percentile(95)},
+        }
+
+
 class SessionStore:
     """会话 = 独立的 HomeAgent（确认状态）+ 历史；按 TTL 与容量上限淘汰。"""
 
-    def __init__(self, settings: AgentSettings) -> None:
+    def __init__(self, settings: AgentSettings, on_tool: Any = None) -> None:
         self._settings = settings
+        self._on_tool = on_tool
         self._items: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
     def __len__(self) -> int:
@@ -129,7 +178,11 @@ class SessionStore:
         self.evict_expired()
         item = self._items.get(session_id)
         if item is None:
-            item = {"agent": HomeAgent(self._settings), "history": [], "last_used": time.time()}
+            item = {
+                "agent": HomeAgent(self._settings, on_tool=self._on_tool),
+                "history": [],
+                "last_used": time.time(),
+            }
             self._items[session_id] = item
             while len(self._items) > self._settings.max_sessions:  # 淘汰最久未用的
                 self._items.popitem(last=False)
@@ -172,7 +225,8 @@ def create_agent_app(
     app = FastAPI(title="HomeLink Agent Daemon", lifespan=lifespan)
     own_connection = connection is None
     conn = connection if connection is not None else McpConnection(settings)
-    store = SessionStore(settings)
+    metrics = Metrics()
+    store = SessionStore(settings, on_tool=metrics.on_tool)
     lock = asyncio.Lock()  # 9B 模型一次只能跑一个请求，串行化避免显存争抢
 
     @app.post("/api/chat", response_model=ChatResponse)
@@ -180,24 +234,37 @@ def create_agent_app(
         await conn.ensure()
         session_id = payload.session_id or uuid.uuid4().hex[:12]
         item = store.get(session_id)
+        started = time.perf_counter()
         async with lock:  # 串行执行；等待期间会话不会被淘汰（TTL 按 last_used）
             try:
                 reply = await item["agent"].respond(
                     conn.session, conn.tools, payload.message, item["history"]
                 )
             except OllamaError as exc:
+                metrics.record_request(error=True, latency_ms=_elapsed_ms(started))
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
             except Exception as exc:  # MCP 掉线等：恢复连接但不重发这一轮，避免红外重复
+                metrics.record_request(error=True, latency_ms=_elapsed_ms(started))
                 await conn.stop()
                 raise HTTPException(
                     status_code=502,
                     detail=f"本轮失败（{exc}）；连接已重置，请重试。上一条命令如已发出不会重复。",
                 ) from exc
+        metrics.record_request(error=False, latency_ms=_elapsed_ms(started))
         history: list[dict[str, str]] = item["history"]
         history.append({"role": "user", "content": payload.message})
         history.append({"role": "assistant", "content": reply})
         del history[:-_HISTORY_CAP]
         return ChatResponse(session_id=session_id, reply=reply)
+
+    @app.get("/api/metrics")
+    async def metrics_endpoint() -> dict[str, Any]:
+        store.evict_expired()
+        return {
+            **metrics.snapshot(),
+            "sessions": len(store),
+            "mcp_connected": conn.connected,
+        }
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
