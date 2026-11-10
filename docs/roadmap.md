@@ -37,7 +37,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 | M2 语义与安全 | 完成 | 统一设备 ID/房间/别名、能力描述、`request_id` 幂等、高风险确认、11 个错误码、审计 |
 | M3 Agent MVP | MVP 完成 | `homelink_mcp`（6 工具）+ `homelink_agent`（Ollama `qwen3.5:9b`），运行时拦截模型自补确认 |
 | M4 语音入口 | 未开始 | 依赖文本链路继续稳定 |
-| M5 自动化 | 部分 | 场景已恢复（仅按顺序执行一组功能）；定时/规则仍返回 501 |
+| M5 自动化 | 部分 | 场景已恢复（仅按顺序执行一组功能）；Agent 审计与重试策略已补；定时/规则仍返回 501 |
 
 ### M0 收口现状
 
@@ -107,6 +107,8 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 ### M5 自动化与多网关（按需，最后做）
 
 - 场景已恢复，但只支持「按顺序执行一组已有功能」（`POST /api/agent/scenes/{id}/run`），不引入调度器；定时 / 规则仍返回 501。若要做定时，应由 Agent 侧调度，通过 HTTP 触发场景，不回到本服务。
+- Agent 侧审计已落地：`logs/agent-audit.jsonl` 逐行记录 `turn_start / tool_call / confirm_downgraded / turn_end / turn_error`，可用 `AGENT_AUDIT_PATH` 改路径或 `off` 关闭。
+- 服务端重试策略已明确写入契约：调用方不得自动重发；`GATEWAY_TIMEOUT` 视为「可能已发出」，`EXECUTION_FAILED / DEVICE_OFFLINE` 可在用户确认后用新 `request_id` 重发。
 - 多网关需要把 `gateway` 从单实例改为多实例，会触及配置、探测与调用路由，属于 v2 契约变更，需单独设计评审。
 
 **验收**：按最终选定的范围另行补充；未选定前不排期。

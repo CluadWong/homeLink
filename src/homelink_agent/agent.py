@@ -12,6 +12,7 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings
 from homelink_agent.llm import OllamaError, chat, to_ollama_tool
 from homelink_agent.prompt import SYSTEM_PROMPT, history_messages
@@ -51,6 +52,7 @@ class HomeAgent:
     ) -> None:
         self._settings = settings
         self._on_tool = on_tool
+        self._audit = AuditLog(settings.audit_path)
         self._pending_device: str | None = None
         self._user_confirmed = False
 
@@ -59,6 +61,9 @@ class HomeAgent:
         previous_pending = self._pending_device
         self._pending_device = None
         self._user_confirmed = _looks_like_consent(user_text)
+        self._audit.write(
+            "turn_start", user=user_text, consent=self._user_confirmed, pending=previous_pending
+        )
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history_messages(history or []))
@@ -82,9 +87,11 @@ class HomeAgent:
                         message = await chat(self._settings, messages, tools)
                         calls = message.get("tool_calls") or []
                         if not calls:
-                            return (
+                            reply = (
                                 str(message.get("content") or "").strip() or "（模型没有返回内容）"
                             )
+                            self._audit.write("turn_end", reply=reply)
+                            return reply
 
                         messages.append(
                             {
@@ -97,9 +104,13 @@ class HomeAgent:
                             messages.append(await self._call_tool(session, call, previous_pending))
             except BaseExceptionGroup as group:
                 # anyio 任务组会把模型/网络异常包成 ExceptionGroup，剥出来再抛
-                raise _unwrap(group) from None
+                error = _unwrap(group)
+                self._audit.write("turn_error", error=str(error))
+                raise error from None
 
-        return "（指令拆得太复杂，已到最大步数；请一次只做一件事）"
+        reply = "（指令拆得太复杂，已到最大步数；请一次只做一件事）"
+        self._audit.write("turn_end", reply=reply)
+        return reply
 
     async def _call_tool(
         self,
@@ -128,6 +139,13 @@ class HomeAgent:
             if getattr(block, "type", "") == "text"
         )
         _debug(f"[tool] {name} {json.dumps(arguments, ensure_ascii=False)} -> {text[:200]}")
+        self._audit.write(
+            "tool_call",
+            tool=name,
+            arguments=arguments,
+            is_error=bool(result.isError),
+            output=text[:500],
+        )
         if self._on_tool is not None:
             self._on_tool(name, arguments, text)
         if result.isError:
@@ -150,6 +168,14 @@ class HomeAgent:
             return arguments
         blocked = dict(arguments)
         blocked["confirm"] = False
+        reason = "设备不在待确认清单" if pending and device_id != pending else "本轮无明确用户同意"
+        self._audit.write(
+            "confirm_downgraded",
+            device_id=device_id,
+            pending=pending,
+            reason=reason,
+            user_confirmed=self._user_confirmed,
+        )
         return blocked
 
     def _server_env(self) -> dict[str, str]:

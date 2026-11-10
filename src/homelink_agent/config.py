@@ -10,6 +10,7 @@ DEFAULT_MODEL = "qwen3.5:9b-q4_K_M"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_MAX_STEPS = 6
 DEFAULT_TIMEOUT = 120.0
+DEFAULT_AUDIT_PATH = "logs/agent-audit.jsonl"
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class AgentSettings:
     homelink_token: str
     max_steps: int
     timeout: float
+    audit_path: str
 
 
 def _positive_int(raw: str, fallback: int) -> int:
@@ -48,4 +50,5 @@ def load_settings() -> AgentSettings:
         homelink_token=(os.environ.get("HOMELINK_API_TOKEN") or "").strip(),
         max_steps=_positive_int(os.environ.get("AGENT_MAX_STEPS", ""), DEFAULT_MAX_STEPS),
         timeout=_positive_float(os.environ.get("AGENT_TIMEOUT", ""), DEFAULT_TIMEOUT),
+        audit_path=(os.environ.get("AGENT_AUDIT_PATH") or DEFAULT_AUDIT_PATH).strip(),
     )

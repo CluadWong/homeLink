@@ -69,7 +69,10 @@ python -m homelink_agent           # 交互模式
 | `HOMELINK_BASE_URL` | `http://127.0.0.1:8000` | 传给 MCP 子进程 |
 | `HOMELINK_API_TOKEN` | 空 | 与服务端 token 一致 |
 | `AGENT_MAX_STEPS` | `6` | 单轮最多几跳工具调用 |
+| `AGENT_AUDIT_PATH` | `logs/agent-audit.jsonl` | 审计日志路径；设为 `off` 关闭 |
 | `AGENT_DEBUG` | 未设置 | 设为 `1` 打印工具调用明细 |
+
+审计日志逐行记录 `turn_start` / `tool_call` / `confirm_downgraded` / `turn_end` / `turn_error`，每条带时间戳与参数，用于回溯「谁在什么时候让 Agent 做了什么」。
 
 高风险设备（`risk_level=high`）由运行时兜底：模型不能自己补 `confirm=true`，只有「上一轮被拦下的同一设备 + 本轮用户明确同意」才放行；其他情况一律降级为 `confirm=false`，由服务端返回 409。
 

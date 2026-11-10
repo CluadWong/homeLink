@@ -169,6 +169,7 @@
 - 同一 `request_id` 重放：原命令成功 → 200 且 `replayed=true`；原命令失败 → 返回原错误码；`device_id/function_id/parameters` 不一致 → 409 `CONFLICT`。
 - 高风险设备未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`；Agent 必须先复述并取得用户确认。
 - 网关不可达 → 503 `DEVICE_OFFLINE` 且命令记为 `failed`；超时 → 504；网关响应异常 → 502。
+- **重试策略：调用方不得自动重发。** `GATEWAY_TIMEOUT` 时信号可能已发出，自动重试会造成重复动作（风扇开关类为翻转语义）；`EXECUTION_FAILED / DEVICE_OFFLINE` 已明确未执行，可在用户重新确认后用**新的 `request_id`** 重发。重放旧 `request_id` 只会拿回原结果，不会再次发送。
 - 场景：`items` 1–20 条，创建时即解析功能；运行逐条发送并返回 `results`，整体 `status` 为 `sent / partial / failed`。场景不引入触发条件与调度。
 - 自动化规则本期不实现，固定 501 `NOT_SUPPORTED`。
 
