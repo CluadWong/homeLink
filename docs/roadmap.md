@@ -7,12 +7,12 @@
 
 | 项 | 现状 |
 | --- | --- |
-| 后端 | FastAPI 单进程 + 单 SQLite（schema v2）；15 条路径 / 33 个端点（21 传统 + 12 Agent），11 个错误码，`X-Trace-Id` 全链路 |
+| 后端 | FastAPI 单进程 + 单 SQLite（schema v2）；26 条路径 / 33 个端点（21 传统 + 12 Agent），11 个错误码，`X-Trace-Id` 全链路 |
 | Agent 接口 | `/api/agent/*` 粗粒度命名空间：设备模型含 `type/room/aliases/risk_level/capabilities/state`，`request_id` 幂等，场景仅顺序执行 |
 | 工具面 | `src/homelink_mcp` 把 6 个能力封装成 MCP 工具（stdio）；`src/homelink_agent` 是本地 Ollama 侧车，工具 schema 由 `tools/list` 动态生成 |
 | 前端 | Vue 3 正式前端已构建并由后端同源托管；Streamlit 六页保留但非启动入口 |
 | 硬件 | 一台 ESPHome 红外网关；`mock` / `real` 只靠配置切换 |
-| 验证 | 全量 pytest 233 passed；ruff / black / mypy 全绿；真实板子只做只读探测，从未发送真实红外 |
+| 验证 | 全量 pytest 280 passed（2026-11-10，P0-1~P0-5 收口后）；ruff / black / mypy 全绿；真实板子只做只读探测，从未发送真实红外 |
 | 运维 | 开机静默自启（计划任务 `HomeLinkService` / `HomeLinkAgent`）+ 每日 03:00 自动备份（`HomeLinkBackup`）+ 登录后地址展示（`HomeLinkAddresses`） |
 
 ## 总体原则
@@ -35,9 +35,9 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 | M0 收口 | 完成 | 空目录已删、历史门禁问题已修、remote 可用 |
 | M1 工具层 | 完成（换了形态） | 没有走「OpenAPI 自动生成几十个工具」，改为 `/api/agent` 6 个粗粒度能力 + 统一 envelope |
 | M2 语义与安全 | 完成 | 统一设备 ID/房间/别名、能力描述、`request_id` 幂等、高风险确认、11 个错误码、审计 |
-| M3 Agent MVP | MVP 完成 | `homelink_mcp`（6 工具）+ `homelink_agent`（Ollama `qwen3.5:9b`），运行时拦截模型自补确认 |
+| M3 Agent MVP | MVP 完成（P0 已收口） | `homelink_mcp`（6 工具）+ `homelink_agent`（Ollama `qwen3.5:9b`），运行时拦截模型自补确认；P0 收口（2026-11-10）：`request_id` 运行时注入、场景高风险强制确认、`X-Actor`/`X-Trace-Id` 透传、契约同步测试 |
 | M4 语音入口 | 暂缓（已决策） | 文本链路已稳定；先用一段时间再定是否启动 |
-| M5 自动化 | 部分 | 场景已恢复（仅按顺序执行一组功能）；Agent 审计与重试策略已补；定时/规则仍返回 501 |
+| M5 自动化 | 部分 | 场景已恢复（仅按顺序执行一组功能，高风险场景需确认后执行）；Agent 审计与重试策略已补；定时/规则仍返回 501 |
 
 ### M0 收口现状
 
@@ -56,7 +56,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 
 **目标**：Agent 无需读源码，仅凭 OpenAPI 就能生成正确的工具调用。
 
-- 确认 `GET /openapi.json` 可用且与 `api-contract.md` 一致（15 条路径 / 21 个端点、错误码、鉴权）。
+- 确认 `GET /openapi.json` 可用且与 `api-contract.md` 一致（15 条路径 / 21 个端点、错误码、鉴权；历史口径，现为 26 条路径 / 33 个端点）。
 - 读取能力已够用：`GET /api/devices` 已返回每个设备的功能列表与房间内部名，房间显示名由 `GET /api/rooms` 提供；按名字定位放在 Agent 侧做本地匹配，M1 不新增搜索端点（确需新增时单独评审契约）。
 - 明确「一次调用」的边界：`POST /api/control` 只接受 `function_id`，不做参数校验，不含探测前置。
 - 运维：SQLite 备份 / 恢复脚本与 `logs/` 轮转——已落地（`scripts/backup.py` 在线快照 + integrity_check + 保留裁剪，`scripts/restore.py` 先验后恢复、坏备份拒绝、旧库改名保留，`scripts/rotate_logs.py` copy-truncate 滚动），2026-11-10 已对运行中的生产库实测备份成功；备份已定时化为计划任务 `HomeLinkBackup`（每日 03:00，随 `install-service.ps1` 注册）。
