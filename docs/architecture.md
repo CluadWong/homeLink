@@ -13,7 +13,7 @@
 
 `build_context(config_dir, db_path, gateway_mode)` 是唯一装配入口：
 
-1. `Database.initialize()` —— 重建版直接建最终 DDL，`SCHEMA_VERSION = 2`；v1 库原地补 `scenes` / `scene_items` / `command_requests`，设备与码不重建。
+1. `Database.initialize()` —— 重建版直接建最终 DDL，`SCHEMA_VERSION = 3`；v1 库先补 `scenes` / `scene_items` / `command_requests`，再把旧 `scene_items` 迁移成动作组并建 `scene_action_groups` / `scene_action_targets` / `scene_triggers`，设备与码不重建。
 2. `ConfigService`（挂 `SqliteAuditStore`）→ `build_gateways` / `build_gateway_probe`（按 `mode` 选 mock/real）。
 3. `DeviceStore`（运行期设备）→ `DeviceStateStore` → `AuditSink`。
 4. `build_service_domains` 装配「设备管理」服务域；没有能力注册表，也没有策略引擎。

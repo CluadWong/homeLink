@@ -2,7 +2,7 @@
 
 红外单向设备管家（控制器版）：FastAPI + SQLite 后端，配 Vue 3 + Vite 正式前端（`frontend/`，构建产物由后端同源托管）；`interface/clients/streamlit/` 是保留的旧过渡代码，已不是启动入口。
 
-> **这是从 0 重建的版本，与旧 `JJ-Butler` 代码库无关**：不带旧代码、旧数据、旧迁移链；schema 为 v2（`SCHEMA_VERSION = 2`）。
+> **这是从 0 重建的版本，与旧 `JJ-Butler` 代码库无关**：不带旧代码、旧数据、旧迁移链；schema 为 v3（`SCHEMA_VERSION = 3`）。
 
 ## 安装与启动
 
@@ -96,7 +96,7 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 
 掉线语义：MCP 掉线时该轮返回 502 并重置连接，**不自动重发**（避免红外重复发送）；Ollama 不可用返回 503。
 
-定时任务存独立 SQLite（`data/agent.db`，不碰 `homelink.db`），到点经 MCP 执行一次场景；执行失败只写审计（`schedule_run` / `schedule_error`），不自动重试。含高风险设备的场景在创建时必须 `confirm=true`，若之后风险升级而创建时未授权，到点会跳过并记审计。定时能力不进 MCP 工具面，避免影响工具选择准确率。
+定时任务存独立 SQLite（`data/agent.db`，不碰 `homelink.db`），到点经 MCP 执行一次场景；执行失败只写审计（`schedule_run` / `schedule_error`），不自动重试。场景在 `homelink.db` 里维护 `enabled` / `action_groups` / `triggers`；停用的场景到点会被服务端拒绝并记审计。含高风险设备的场景在创建时必须 `confirm=true`，若之后风险升级而创建时未授权，到点会跳过并记审计。定时能力不进 MCP 工具面，避免影响工具选择准确率。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |

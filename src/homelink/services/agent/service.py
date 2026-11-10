@@ -218,66 +218,210 @@ class AgentService:
     def list_scenes(self) -> list[dict[str, Any]]:
         return self._scenes.list_all()
 
+    def get_scene(self, scene_id: str) -> dict[str, Any]:
+        return self._scenes.get(scene_id)
+
+    def list_capabilities(self) -> dict[str, Any]:
+        """能力目录：按能力名聚合支持它的设备，供场景编辑时过滤设备列表。"""
+
+        index: dict[str, list[dict[str, Any]]] = {}
+        for device in self._devices.list():
+            for function in device.get("functions", []):
+                index.setdefault(function["name"], []).append(
+                    {
+                        "device_id": device["id"],
+                        "name": device["name"],
+                        "room": device["room"],
+                        "function_id": function["id"],
+                    }
+                )
+        capabilities = [
+            {"capability": capability, "device_count": len(devices), "devices": devices}
+            for capability, devices in sorted(index.items())
+        ]
+        return {"count": len(capabilities), "capabilities": capabilities}
+
     def delete_scene(self, scene_id: str) -> dict[str, Any]:
         return self._scenes.delete(scene_id)
 
-    def create_scene(self, name: str, items: list[dict[str, str]]) -> dict[str, Any]:
-        resolved: list[dict[str, str]] = []
-        for item in items:
-            device = self._devices.get(item["device_id"])
-            function = self._resolve_function(device, item["command"])
-            resolved.append({"device_id": device["id"], "function_id": function["id"]})
-        return self._scenes.create(name.strip(), resolved)
+    def create_scene(
+        self,
+        name: str,
+        *,
+        items: list[dict[str, str]] | None = None,
+        action_groups: list[dict[str, Any]] | None = None,
+        triggers: list[dict[str, Any]] | None = None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """`items` 是旧契约（每个功能一项），`action_groups` 是按能力归组的新契约。"""
+
+        groups = self._resolve_groups(items=items, action_groups=action_groups)
+        return self._scenes.create(
+            name=name.strip(),
+            groups=groups,
+            triggers=triggers or [_manual_trigger()],
+            enabled=enabled,
+        )
+
+    def update_scene(
+        self,
+        scene_id: str,
+        *,
+        name: str | None = None,
+        enabled: bool | None = None,
+        action_groups: list[dict[str, Any]] | None = None,
+        triggers: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        groups = self._resolve_action_groups(action_groups) if action_groups is not None else None
+        return self._scenes.update(
+            scene_id,
+            name=name.strip() if name is not None else None,
+            enabled=enabled,
+            groups=groups,
+            triggers=triggers,
+        )
 
     def run_scene(
         self, scene_id: str, *, confirm: bool, actor: str, trace_id: str
     ) -> dict[str, Any]:
+        """按动作组尽力而为执行：单设备失败/离线不阻断其他设备，也绝不回滚。"""
+
         scene = self._scenes.get(scene_id)
-        if not scene["items"]:
-            raise AppError(ErrorCode.INVALID_REQUEST, "场景没有任何可执行功能")
+        if not scene["enabled"]:
+            raise AppError(
+                ErrorCode.INVALID_REQUEST,
+                f"场景「{scene['name']}」已停用，请先启用再执行",
+            )
+        targets = [target for group in scene["action_groups"] for target in group["targets"]]
+        if not targets:
+            raise AppError(ErrorCode.INVALID_REQUEST, "场景没有任何可执行动作")
         if scene["contains_high_risk"] and not confirm:
             raise AppError(
                 ErrorCode.CONFIRMATION_REQUIRED,
                 f"场景「{scene['name']}」包含高风险设备，请先向用户复述并确认，再带 confirm=true 重试",
             )
+
         results: list[dict[str, Any]] = []
-        for index, item in enumerate(scene["items"]):
-            request_id = f"scene-{scene_id}-{index}-{secrets.token_hex(4)}"
-            try:
-                result = self.control(
-                    device_id=item["device_id"],
-                    command=item["function_id"],
-                    parameters={},
-                    request_id=request_id,
-                    confirm=True,
+        counters = {"sent": 0, "failed": 0, "offline": 0}
+        for group in scene["action_groups"]:
+            capability = group["capability"]
+            for target in group["targets"]:
+                result = self._run_target(
+                    scene_id=scene_id,
+                    group=group,
+                    target=target,
+                    index=len(results),
+                    capability=capability,
                     actor=actor,
                     trace_id=trace_id,
                 )
-            except AppError as exc:
-                results.append(
-                    {
-                        "device_id": item["device_id"],
-                        "command": item["command"],
-                        "status": "failed",
-                        "error_code": exc.code.value,
-                        "message": exc.message,
-                    }
-                )
-                continue
-            results.append(
-                {
-                    "device_id": item["device_id"],
-                    "command": item["command"],
-                    "status": "sent",
-                    "request_id": result["request_id"],
-                    "message": result["message"],
-                }
-            )
-        sent = sum(1 for item in results if item["status"] == "sent")
+                counters[result["status"]] += 1
+                results.append(result)
+
+        sent = counters["sent"]
         overall = "sent" if sent == len(results) else ("failed" if sent == 0 else "partial")
-        return {"scene_id": scene_id, "status": overall, "results": results}
+        return {
+            "scene_id": scene_id,
+            "status": overall,
+            # 尽力而为：没有事务回滚，逐设备汇报；调用方按 results 告知用户哪台没成功。
+            "results": results,
+            "summary": {"total": len(results), **counters},
+        }
+
+    def _run_target(
+        self,
+        *,
+        scene_id: str,
+        group: dict[str, Any],
+        target: dict[str, Any],
+        index: int,
+        capability: str,
+        actor: str,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        base = {
+            "group_id": group["group_id"],
+            "capability": capability,
+            "device_id": target["device_id"],
+            "device_name": target["device_name"],
+            "command": capability,
+        }
+        function_id = target.get("function_id")
+        if function_id is None:
+            return {
+                **base,
+                "status": "failed",
+                "error_code": ErrorCode.NOT_SUPPORTED.value,
+                "message": f"设备当前不支持能力「{capability}」，已跳过",
+            }
+        try:
+            result = self.control(
+                device_id=target["device_id"],
+                command=function_id,
+                parameters={},
+                request_id=f"scene-{scene_id}-{index}-{secrets.token_hex(4)}",
+                confirm=True,
+                actor=actor,
+                trace_id=trace_id,
+            )
+        except AppError as exc:
+            return {
+                **base,
+                "status": "offline" if exc.code is ErrorCode.DEVICE_OFFLINE else "failed",
+                "error_code": exc.code.value,
+                "message": exc.message,
+            }
+        return {
+            **base,
+            "status": "sent",
+            "request_id": result["request_id"],
+            "message": result["message"],
+        }
 
     # ---- 内部 ----
+
+    def _resolve_groups(
+        self,
+        *,
+        items: list[dict[str, str]] | None,
+        action_groups: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        if (items is None) == (action_groups is None):
+            raise AppError(ErrorCode.INVALID_REQUEST, "items 与 action_groups 必须且只能提供一种")
+        if action_groups is not None:
+            return self._resolve_action_groups(action_groups)
+        groups: list[dict[str, Any]] = []
+        for item in items or []:
+            device = self._devices.get(item["device_id"])
+            function = self._resolve_function(device, item["command"])
+            groups.append(
+                {
+                    "name": function["name"],
+                    "capability": function["name"],
+                    "targets": [device["id"]],
+                }
+            )
+        return groups
+
+    def _resolve_action_groups(self, action_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """创建/更新动作组时即校验：目标设备必须支持该能力，否则拒绝入库。"""
+
+        groups: list[dict[str, Any]] = []
+        for group in action_groups:
+            capability = group["capability"].strip()
+            group_name = (group.get("name") or capability).strip()
+            targets: list[str] = []
+            for device_id in group["targets"]:
+                device = self._devices.get(device_id)
+                self._resolve_function(device, capability)
+                if device["id"] in targets:
+                    raise AppError(
+                        ErrorCode.INVALID_REQUEST,
+                        f"动作组「{group_name}」内设备「{device['name']}」重复",
+                    )
+                targets.append(device["id"])
+            groups.append({"name": group_name, "capability": capability, "targets": targets})
+        return groups
 
     def _online(self) -> bool:
         return bool(self._probe.status()["reachable"])
@@ -361,6 +505,12 @@ class AgentService:
 
 def _dump(parameters: dict[str, Any]) -> str:
     return json.dumps(parameters, ensure_ascii=False)
+
+
+def _manual_trigger() -> dict[str, Any]:
+    """未显式声明触发方式时补一个手动触发器；运行端点本身就等价于手动命中。"""
+
+    return {"type": "manual", "enabled": True, "config": {}}
 
 
 def _command_payload(record: dict[str, Any], *, replayed: bool) -> dict[str, Any]:

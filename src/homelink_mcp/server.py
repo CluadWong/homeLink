@@ -145,7 +145,7 @@ async def home_control_device(
 async def home_run_scene(
     ctx: Context[Any, HomeLinkClient, Any], scene_id: str, confirm: bool = False
 ) -> dict[str, Any]:
-    """按顺序执行一个已存在的场景。
+    """执行一个已存在的场景（动作组 → 目标设备），按设备逐台执行。
 
     Args:
         scene_id: 场景 ID，来自 home_get_home_snapshot 返回的 scenes 列表。
@@ -154,8 +154,12 @@ async def home_run_scene(
 
     Returns:
         {"scene_id": str, "status": "sent" | "partial" | "failed",
-        "results": [{"device_id", "command", "status", "request_id" | "error_code", "message"}]}。
-        整体失败不抛错，按 results 逐条向用户汇报失败项。
+        "results": [{"group_id", "capability", "device_id", "device_name",
+        "command", "status": "sent" | "failed" | "offline",
+        "request_id" | "error_code", "message"}],
+        "summary": {"total", "sent", "failed", "offline"}}。
+        尽力而为、不回滚：单台离线或失去能力不影响其他设备；场景停用返回 INVALID_REQUEST。
+        按 results 逐台向用户汇报，不要笼统说「场景执行失败」。
     """
     return await _http(ctx).run_scene(scene_id, confirm=confirm)
 
@@ -170,7 +174,8 @@ async def home_create_automation(
         rule: 规则草案，服务端不解析，仅用于表达意图。
 
     Returns:
-        失败：not supported。需要定时能力时应告知用户改用手动触发场景或外部调度。
+        失败：not supported。需要定时能力时应告知用户当前只能手动触发场景，
+        触发器需由外部系统命中。
     """
     return await _http(ctx).create_automation(rule)
 

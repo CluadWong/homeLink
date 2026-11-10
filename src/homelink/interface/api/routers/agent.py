@@ -8,7 +8,9 @@ from homelink.core.errors import AppError, ErrorCode
 from homelink.interface.api.schemas import (
     AgentControlRequest,
     AgentMetadataRequest,
+    AgentSceneActionGroup,
     AgentSceneCreateRequest,
+    AgentScenePatchRequest,
     AgentSceneRunRequest,
 )
 from homelink.interface.api.security import require_token
@@ -25,6 +27,17 @@ def _actor(request: Request) -> str:
 
 def _envelope(request: Request, result: object) -> dict:
     return {"success": True, "result": result, "trace_id": request.state.trace_id}
+
+
+def _groups_payload(groups: list[AgentSceneActionGroup]) -> list[dict]:
+    return [
+        {
+            "name": group.name,
+            "capability": group.capability,
+            "targets": [target.device_id for target in group.targets],
+        }
+        for group in groups
+    ]
 
 
 @router.get("/devices")
@@ -90,6 +103,14 @@ def command_status(request: Request, request_id: str) -> dict:
     return _envelope(request, context.agent.command_status(request_id))
 
 
+@router.get("/capabilities")
+def list_capabilities(request: Request) -> dict:
+    """能力目录：能力名 → 支持该能力的设备，供场景编辑时过滤设备列表。"""
+
+    context = request.app.state.context
+    return _envelope(request, context.agent.list_capabilities())
+
+
 @router.get("/scenes")
 def list_scenes(request: Request) -> dict:
     context = request.app.state.context
@@ -97,11 +118,57 @@ def list_scenes(request: Request) -> dict:
     return _envelope(request, {"count": len(scenes), "scenes": scenes})
 
 
+@router.get("/scenes/{scene_id}")
+def get_scene(request: Request, scene_id: str) -> dict:
+    context = request.app.state.context
+    return _envelope(request, context.agent.get_scene(scene_id))
+
+
 @router.post("/scenes")
 def create_scene(request: Request, payload: AgentSceneCreateRequest) -> dict:
     context = request.app.state.context
-    items = [{"device_id": item.device_id, "command": item.command} for item in payload.items]
-    return _envelope(request, context.agent.create_scene(payload.name, items))
+    items = (
+        [{"device_id": item.device_id, "command": item.command} for item in payload.items]
+        if payload.items is not None
+        else None
+    )
+    groups = _groups_payload(payload.action_groups) if payload.action_groups is not None else None
+    triggers = (
+        [trigger.model_dump() for trigger in payload.triggers]
+        if payload.triggers is not None
+        else None
+    )
+    return _envelope(
+        request,
+        context.agent.create_scene(
+            payload.name,
+            items=items,
+            action_groups=groups,
+            triggers=triggers,
+            enabled=payload.enabled,
+        ),
+    )
+
+
+@router.patch("/scenes/{scene_id}")
+def update_scene(request: Request, scene_id: str, payload: AgentScenePatchRequest) -> dict:
+    context = request.app.state.context
+    groups = _groups_payload(payload.action_groups) if payload.action_groups is not None else None
+    triggers = (
+        [trigger.model_dump() for trigger in payload.triggers]
+        if payload.triggers is not None
+        else None
+    )
+    return _envelope(
+        request,
+        context.agent.update_scene(
+            scene_id,
+            name=payload.name,
+            enabled=payload.enabled,
+            action_groups=groups,
+            triggers=triggers,
+        ),
+    )
 
 
 @router.delete("/scenes/{scene_id}")

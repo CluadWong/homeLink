@@ -8,7 +8,7 @@
 
 - 单进程：一个 FastAPI 服务 + 一个本地 SQLite 文件；无消息队列、无缓存中间件、无外部数据库。
 - 一台主机接一个红外网关（ESPHome 板子），网关是唯一的外部硬件依赖。
-- 状态、审计、配置审计落在同一个 SQLite 文件；当前 `SCHEMA_VERSION = 2`（v1 → v2 原地补 `scenes` / `scene_items` / `command_requests` 三表，设备数据不重建）。
+- 状态、审计、配置审计落在同一个 SQLite 文件；当前 `SCHEMA_VERSION = 3`（v1 → v2 补场景与命令记录，v2 → v3 场景升级为动作组/目标/触发器，设备数据不重建）。
 - 不联网、不调用云端模型、无 LLM 依赖；鉴权值只放在不入库的 `settings.local.yaml`。单用户、无登录：身份只区分 `user` / `system`。
 
 ## 范围内
@@ -28,7 +28,7 @@
 | 不做什么 | 归属 |
 | --- | --- |
 | 内置功能、能力（capability）、参数化控制、策略分级 | **本期放弃**：所有控制都是学码功能回放，不存能力表、不校验参数 |
-| 场景、定时、规则引擎、意图理解与多轮对话 | **场景已恢复**：仅表示「按顺序执行一组已学码功能」，无参数、无条件、无定时；自动化定时与规则引擎仍不做（`POST /api/agent/automations` 固定 `501 NOT_SUPPORTED`），对话与意图理解由上层智能管家实现 |
+| 场景、定时、规则引擎、意图理解与多轮对话 | **场景已恢复并升级为编排层**：动作组按能力归组、目标设备运行时查能力、支持启用开关与触发器（manual / schedule / voice / device_state）落库；本期只有手动执行入口，定时由 Agent 侧调度器到点调用，自动化创建与规则引擎仍不做（`POST /api/agent/automations` 固定 `501 NOT_SUPPORTED`），对话与意图理解由上层智能管家实现 |
 | 温湿度等传感器 | **本期不接入**：`/api/state` 明确返回 `available=false` 与 `null`，界面显示「未接入」 |
 | 用户体系与鉴权 | 单用户本地部署，暂不需要 |
 | 正式前端 | 已完成：Vue 前端在 `frontend/` 实现，`frontend/dist` 构建通过并由后端同源托管，契约见 `frontend-contract.md`；Streamlit 保留但不参与启动 |

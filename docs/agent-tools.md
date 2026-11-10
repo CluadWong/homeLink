@@ -24,22 +24,23 @@
 10. 执行包含高风险设备的场景前，先把场景内容复述给用户并征得明确同意；包含高风险设备的场景未确认时返回 409 CONFIRMATION_REQUIRED，得到同意后带 confirm=true 重试。
 
 【场景与自动化】
-11. 场景是预先建好的一组功能顺序执行，只能用 home_run_scene 按 scene_id 运行；结果 status 为 sent / partial / failed，按 results 逐条汇报失败项。
-12. 不支持创建自动化或定时：home_create_automation 恒返回 501 NOT_SUPPORTED。用户要定时时，说明当前只能手动触发场景或由外部系统调度。
+11. 场景是预先建好的动作编排：每个动作组声明一项能力，并列出支持该能力的设备。只能用 home_run_scene 按 scene_id 运行；整体 status 为 sent / partial / failed，逐设备 status 为 sent / failed / offline。
+12. 场景执行是尽力而为的：某台设备离线或失去能力不影响其他设备，也没有回滚。按 results 逐台汇报谁成功、谁失败、原因是什么，不要笼统说「场景执行失败」。
+13. 不支持创建自动化或定时：home_create_automation 恒返回 501 NOT_SUPPORTED。用户要定时时，说明当前只有手动触发场景的入口，触发器需由外部系统命中。
 
 【错误处理】
-13. 把错误码翻译成人话，并给出下一步：
+14. 把错误码翻译成人话，并给出下一步：
     - NOT_FOUND 且提示「没有功能」：重新 home_find_devices 读 capabilities，告诉用户这台设备实际能做什么。
     - DEVICE_OFFLINE：网关不可达，提示检查红外板电源与网络，最多重试 1 次。
     - GATEWAY_TIMEOUT：信号可能已发出，不要自动重发；告知用户风险并建议现场确认。
     - EXECUTION_FAILED：网关返回异常，同样不要盲目重发。
     - CONFIRMATION_REQUIRED：按第 9 条先确认再重试。
-    - INVALID_REQUEST：检查是否误传了 parameters，或功能名有重名。
-14. 向用户排障时再展示 trace_id，其余情况不要主动输出。
+    - INVALID_REQUEST：检查是否误传了 parameters，或功能名有重名；场景停用也会返回该错误。
+15. 向用户排障时再展示 trace_id，其余情况不要主动输出。
 
 【回答风格】
-15. 控制成功后只陈述「信号已发出」，不断言设备当前真实开关状态。
-16. 只回答用户问到的事，不主动罗列全部设备。
+16. 控制成功后只陈述「信号已发出」，不断言设备当前真实开关状态。
+17. 只回答用户问到的事，不主动罗列全部设备。
 ```
 
 ## 2. 工具 ↔ HTTP 映射
@@ -50,10 +51,10 @@
 | `home_get_device_state` | GET | `/api/agent/devices/{device_id}/state` | 单设备虚拟状态 |
 | `home_get_home_snapshot` | GET | `/api/agent/snapshot` | 网关状态 + 设备列表 + 场景列表，一次拿全 |
 | `home_control_device` | POST | `/api/agent/control` | 回放一条已学码功能；`request_id` 幂等 |
-| `home_run_scene` | POST | `/api/agent/scenes/{scene_id}/run` | 顺序执行场景内功能；包含高风险设备的场景须 `confirm=true` |
+| `home_run_scene` | POST | `/api/agent/scenes/{scene_id}/run` | 按动作组逐设备尽力而为执行；停用的场景拒绝执行，包含高风险设备的场景须 `confirm=true` |
 | `home_create_automation` | POST | `/api/agent/automations` | 固定 `501 NOT_SUPPORTED`，保留给未来 |
 
-管理端专用、**不**给模型的能力：单设备详情 `GET /api/agent/devices/{id}`、元数据写入 `PUT .../metadata`、场景增删查（`GET/POST/DELETE /api/agent/scenes`）、命令结果查询 `GET /api/agent/commands/{request_id}`。这些由人、脚本或运维流程调用。
+管理端专用、**不**给模型的能力：单设备详情 `GET /api/agent/devices/{id}`、元数据写入 `PUT .../metadata`、场景增删改查（`GET/POST/PATCH/DELETE /api/agent/scenes`）、能力目录 `GET /api/agent/capabilities`、命令结果查询 `GET /api/agent/commands/{request_id}`。这些由人、脚本或运维流程调用；场景编辑界面用能力目录过滤设备列表，只展示支持所选能力的设备。
 
 可选请求头 `X-Actor`（≤64 字符，默认 `user`），用于把调用方写进审计；模型不必感知。MCP 客户端（`homelink_mcp`）会自动带上 `X-Actor`（默认 `butler-agent`，经 `HOMELINK_ACTOR` 配置，超长按 64 截断）与 `X-Trace-Id`（每请求生成 8 位），后端会采纳传入的 `X-Trace-Id`，据此把 MCP 日志、Agent 审计与后端 `audit_logs` 串成一条链。
 
@@ -176,7 +177,7 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
     "type": "function",
     "function": {
       "name": "home_run_scene",
-      "description": "按顺序执行一个已存在的场景。场景 ID 来自快照的 scenes 列表。返回逐项结果与整体状态（sent / partial / failed）。包含高风险设备（contains_high_risk=true）的场景必须由用户明确同意后传 confirm=true。",
+      "description": "执行一个已存在的场景（动作组 → 目标设备）。场景 ID 来自快照的 scenes 列表。按设备逐台返回结果：status 为 sent / failed / offline，整体为 sent / partial / failed，并给出 summary。执行是尽力而为的，单台失败/离线不影响其他设备。场景 enabled=false 时返回 INVALID_REQUEST。包含高风险设备（contains_high_risk=true）的场景必须由用户明确同意后传 confirm=true。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -282,18 +283,24 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
 
 ### 4.4 场景执行（run_scene）
 
-场景列表（快照 `scenes`）中的每个场景附带风险聚合：`risk_level`（`low` / `high`）与 `contains_high_risk`；包含高风险设备的场景未带 `confirm=true` 会返回 409 `CONFIRMATION_REQUIRED`，不会执行任何一项。
+场景列表（快照 `scenes`）中的每个场景包含 `enabled`、`action_groups` 与 `triggers`，并附带风险聚合：`risk_level`（`low` / `high`）与 `contains_high_risk`。`enabled=false` 的场景直接返回 400 `INVALID_REQUEST`，不产生任何命令记录；包含高风险设备的场景未带 `confirm=true` 会返回 409 `CONFIRMATION_REQUIRED`，同样不会执行任何一项。
 
 ```json
 {
   "scene_id": "sc_1a2b3c4d5e6f",
   "status": "partial",
   "results": [
-    { "device_id": "dev_56b875c8", "command": "开关", "status": "sent", "request_id": "scene-sc_1a2b3c4d5e6f-0-9f11ab23", "message": "信号已发出" },
-    { "device_id": "dev_a1b0d435", "command": "关机", "status": "failed", "error_code": "DEVICE_OFFLINE", "message": "网关当前不可达，请检查板子电源与网络" }
-  ]
+    { "group_id": "sg_9f11ab23", "capability": "关闭灯光", "device_id": "dev_56b875c8", "device_name": "床头灯", "command": "关闭灯光", "status": "sent", "request_id": "scene-sc_1a2b3c4d5e6f-0-7c2a11de", "message": "信号已发出" },
+    { "group_id": "sg_9f11ab23", "capability": "关闭灯光", "device_id": "dev_a1b0d435", "device_name": "智能插座", "command": "关闭灯光", "status": "offline", "error_code": "DEVICE_OFFLINE", "message": "网关当前不可达，请检查板子电源与网络" },
+    { "group_id": "sg_4d2e9a10", "capability": "关窗帘", "device_id": "dev_c7d1e2f3", "device_name": "客厅窗帘", "command": "关窗帘", "status": "failed", "error_code": "NOT_SUPPORTED", "message": "设备当前不支持能力「关窗帘」，已跳过" }
+  ],
+  "summary": { "total": 3, "sent": 1, "failed": 1, "offline": 1 }
 }
 ```
+
+- 尽力而为，不回滚：已发出的红外不会因为别的设备失败而撤销或重发。
+- `NOT_SUPPORTED` 表示该设备后来失去了这项能力（功能被删除）；提示用户重新编辑场景或重新学码。
+- 对用户汇报时按设备粒度说明（哪台成功、哪台离线、哪台不支持），不要只说「场景失败」。
 
 ### 4.5 自动化（create_automation）
 

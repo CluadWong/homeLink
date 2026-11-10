@@ -1,4 +1,4 @@
-"""schema 与不变式：v2 最终 DDL、禁建结构、约束、级联。"""
+"""schema 与不变式：v3 最终 DDL、禁建结构、约束、级联、旧场景迁移。"""
 
 from __future__ import annotations
 
@@ -160,7 +160,7 @@ def test_v1_database_migrates_in_place(tmp_path):
     db = Database(db_path)
     db.initialize()
 
-    assert db.user_version() == 2
+    assert db.user_version() == 3
     with db.reader() as conn:
         tables = {
             row[0]
@@ -177,14 +177,20 @@ def test_v1_database_migrates_in_place(tmp_path):
             "audit_logs",
             "config_audit",
             "scenes",
-            "scene_items",
+            "scene_action_groups",
+            "scene_action_targets",
+            "scene_triggers",
             "command_requests",
         }
         assert conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM ir_codes").fetchone()[0] == 1
         audit_columns = {row["name"] for row in conn.execute("PRAGMA table_info(audit_logs)")}
         assert "device_id" in audit_columns
-        conn.execute("INSERT INTO scenes(id, name, created_at) VALUES ('sc_1', '回家', ?)", (NOW,))
+        conn.execute(
+            "INSERT INTO scenes(id, name, enabled, created_at, updated_at)"
+            " VALUES ('sc_1', '回家', 1, ?, ?)",
+            (NOW, NOW),
+        )
         conn.execute(
             """
             INSERT INTO command_requests(
@@ -197,15 +203,108 @@ def test_v1_database_migrates_in_place(tmp_path):
         )
 
     db.initialize()
-    assert db.user_version() == 2
+    assert db.user_version() == 3
 
 
-def test_user_version_is_two(context):
-    assert SCHEMA_VERSION == 2
-    assert context.db.user_version() == 2
+def test_v2_scene_items_migrate_into_action_groups(tmp_path):
+    db_path = tmp_path / "v2.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(V1_DDL)
+        conn.executescript("""
+            CREATE TABLE scenes (
+                id         TEXT PRIMARY KEY,
+                name       TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE scene_items (
+                id          TEXT PRIMARY KEY,
+                scene_id    TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                function_id TEXT NOT NULL REFERENCES device_functions(id) ON DELETE CASCADE,
+                position    INTEGER NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+            CREATE TABLE command_requests (
+                request_id    TEXT PRIMARY KEY,
+                device_id     TEXT NOT NULL,
+                function_id   TEXT NOT NULL,
+                command       TEXT NOT NULL,
+                parameters    TEXT NOT NULL DEFAULT '{}',
+                actor         TEXT NOT NULL DEFAULT 'user',
+                status        TEXT NOT NULL,
+                error_code    TEXT,
+                error_message TEXT,
+                trace_id      TEXT NOT NULL,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL
+            );
+            """)
+        conn.execute("PRAGMA user_version = 2")
+        conn.execute(
+            "INSERT INTO rooms(name, display_name, created_at) VALUES ('living_room', '客厅', ?)",
+            (NOW,),
+        )
+        conn.execute(
+            """
+            INSERT INTO devices(id, name, adapter, room, notes, extra, created_at, updated_at)
+            VALUES ('dev_1', '床头灯', 'ir', 'living_room', NULL, '{}', ?, ?)
+            """,
+            (NOW, NOW),
+        )
+        conn.execute(
+            """
+            INSERT INTO device_functions(id, device_id, name, created_at, updated_at)
+            VALUES ('fn_1', 'dev_1', '关闭灯光', ?, ?)
+            """,
+            (NOW, NOW),
+        )
+        conn.execute(
+            "INSERT INTO scenes(id, name, created_at) VALUES ('sc_1', '全屋晚安', ?)", (NOW,)
+        )
+        conn.execute(
+            """
+            INSERT INTO scene_items(id, scene_id, device_id, function_id, position, created_at)
+            VALUES ('si_1', 'sc_1', 'dev_1', 'fn_1', 0, ?)
+            """,
+            (NOW,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    db = Database(db_path)
+    db.initialize()
+
+    assert db.user_version() == 3
+    with db.reader() as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='scene_items'"
+            ).fetchone()[0]
+            == 0
+        )
+        scene = conn.execute("SELECT enabled, updated_at FROM scenes WHERE id='sc_1'").fetchone()
+        assert scene["enabled"] == 1
+        assert scene["updated_at"] == NOW
+        group = conn.execute(
+            "SELECT name, capability FROM scene_action_groups WHERE scene_id='sc_1'"
+        ).fetchone()
+        assert (group["name"], group["capability"]) == ("关闭灯光", "关闭灯光")
+        target = conn.execute("""
+            SELECT t.device_id FROM scene_action_targets t
+            JOIN scene_action_groups g ON g.id = t.group_id
+            WHERE g.scene_id = 'sc_1'
+            """).fetchone()
+        assert target["device_id"] == "dev_1"
 
 
-def test_exactly_ten_tables(context):
+def test_user_version_is_three(context):
+    assert SCHEMA_VERSION == 3
+    assert context.db.user_version() == 3
+
+
+def test_exactly_twelve_tables(context):
     assert table_names(context) == {
         "rooms",
         "devices",
@@ -215,7 +314,9 @@ def test_exactly_ten_tables(context):
         "audit_logs",
         "config_audit",
         "scenes",
-        "scene_items",
+        "scene_action_groups",
+        "scene_action_targets",
+        "scene_triggers",
         "command_requests",
     }
 

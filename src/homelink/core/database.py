@@ -1,17 +1,18 @@
 """SQLite 连接与最终 DDL。
 
-SCHEMA_VERSION = 2：v1 七张业务表保持不变；v2 新增 Agent 侧的场景与命令记录，
-老库按 v1 -> v2 原地补表，不重建设备数据。
+SCHEMA_VERSION = 3：v1 七张业务表保持不变；v2 新增 Agent 侧的场景与命令记录；
+v3 把场景从扁平 items 升级为「动作组 + 目标设备 + 触发器」，老 items 原地迁移后删除。
 """
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_NAME = "homelink"
 
@@ -19,16 +20,38 @@ AGENT_DDL = """
 CREATE TABLE IF NOT EXISTS scenes (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+    enabled    INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scene_action_groups (
+    id         TEXT PRIMARY KEY,
+    scene_id   TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+    capability TEXT NOT NULL CHECK (length(trim(capability)) > 0 AND length(capability) <= 40),
+    position   INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS scene_items (
-    id          TEXT PRIMARY KEY,
-    scene_id    TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
-    device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-    function_id TEXT NOT NULL REFERENCES device_functions(id) ON DELETE CASCADE,
-    position    INTEGER NOT NULL,
-    created_at  TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS scene_action_targets (
+    id         TEXT PRIMARY KEY,
+    group_id   TEXT NOT NULL REFERENCES scene_action_groups(id) ON DELETE CASCADE,
+    device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    position   INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scene_triggers (
+    id         TEXT PRIMARY KEY,
+    scene_id   TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL
+               CHECK (type IN ('manual', 'schedule', 'voice', 'device_state')),
+    config     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(config)),
+    enabled    INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    position   INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS command_requests (
@@ -133,7 +156,9 @@ CREATE INDEX idx_device_states_device ON device_states(device_id, id);
 CREATE INDEX idx_audit_logs_created ON audit_logs(id);
 CREATE INDEX idx_audit_logs_device ON audit_logs(device_id, id);
 CREATE INDEX idx_config_audit_created ON config_audit(id);
-CREATE INDEX idx_scene_items_scene ON scene_items(scene_id, position);
+CREATE INDEX idx_scene_action_groups_scene ON scene_action_groups(scene_id, position);
+CREATE INDEX idx_scene_action_targets_group ON scene_action_targets(group_id, position);
+CREATE INDEX idx_scene_triggers_scene ON scene_triggers(scene_id, position);
 CREATE INDEX idx_command_requests_device ON command_requests(device_id, created_at);
 """
 )
@@ -182,10 +207,13 @@ class Database:
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             elif version == 1:
                 self._migrate_v1_to_v2(conn)
+                self._migrate_v2_to_v3(conn)
+            elif version == 2:
+                self._migrate_v2_to_v3(conn)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(
                     f"数据库 schema 版本为 {version}，与目标 {SCHEMA_VERSION} 不一致；"
-                    "只支持 v1 -> v2 原地补表，其余版本请另写一次性迁移脚本"
+                    "只支持 v1 -> v2 -> v3 原地补表，其余版本请另写一次性迁移脚本"
                 )
             else:
                 self._add_missing_audit_device_id(conn)
@@ -197,8 +225,142 @@ class Database:
         """v1 -> v2：只补 Agent 场景与命令记录表，设备/功能/码/状态/审计原样保留。"""
 
         Database._add_missing_audit_device_id(conn)
-        conn.executescript(AGENT_DDL)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS scenes (
+                id         TEXT PRIMARY KEY,
+                name       TEXT NOT NULL UNIQUE
+                           CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS scene_items (
+                id          TEXT PRIMARY KEY,
+                scene_id    TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                function_id TEXT NOT NULL REFERENCES device_functions(id) ON DELETE CASCADE,
+                position    INTEGER NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS command_requests (
+                request_id    TEXT PRIMARY KEY,
+                device_id     TEXT NOT NULL,
+                function_id   TEXT NOT NULL,
+                command       TEXT NOT NULL,
+                parameters    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(parameters)),
+                actor         TEXT NOT NULL DEFAULT 'user'
+                              CHECK (length(trim(actor)) > 0 AND length(actor) <= 64),
+                status        TEXT NOT NULL CHECK (status IN ('running', 'sent', 'failed')),
+                error_code    TEXT,
+                error_message TEXT,
+                trace_id      TEXT NOT NULL,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_scene_items_scene
+                ON scene_items(scene_id, position);
+            CREATE INDEX IF NOT EXISTS idx_command_requests_device
+                ON command_requests(device_id, created_at);
+            """)
+        conn.execute("PRAGMA user_version = 2")
+
+    @staticmethod
+    def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+        """v2 -> v3：场景升级为动作组/目标/触发器，旧 items 原地转组后删除。"""
+
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(scenes)")}
+        if "enabled" not in columns:
+            conn.execute("ALTER TABLE scenes ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        if "updated_at" not in columns:
+            conn.execute("ALTER TABLE scenes ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+        conn.execute("UPDATE scenes SET updated_at = created_at WHERE updated_at = ''")
+
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS scene_action_groups (
+                id         TEXT PRIMARY KEY,
+                scene_id   TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                name       TEXT NOT NULL
+                           CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+                capability TEXT NOT NULL
+                           CHECK (length(trim(capability)) > 0 AND length(capability) <= 40),
+                position   INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS scene_action_targets (
+                id         TEXT PRIMARY KEY,
+                group_id   TEXT NOT NULL REFERENCES scene_action_groups(id) ON DELETE CASCADE,
+                device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                position   INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS scene_triggers (
+                id         TEXT PRIMARY KEY,
+                scene_id   TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                type       TEXT NOT NULL
+                           CHECK (type IN ('manual', 'schedule', 'voice', 'device_state')),
+                config     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(config)),
+                enabled    INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+                position   INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_scene_action_groups_scene
+                ON scene_action_groups(scene_id, position);
+            CREATE INDEX IF NOT EXISTS idx_scene_action_targets_group
+                ON scene_action_targets(group_id, position);
+            CREATE INDEX IF NOT EXISTS idx_scene_triggers_scene
+                ON scene_triggers(scene_id, position);
+            """)
+
+        has_items = (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scene_items'"
+            ).fetchone()
+            is not None
+        )
+        if has_items:
+            Database._migrate_scene_items(conn)
+            conn.execute("DROP TABLE scene_items")
+
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_scene_items(conn: sqlite3.Connection) -> None:
+        """旧 items 一行转成一个动作组：能力即功能名，目标只有该设备。"""
+
+        rows = conn.execute("""
+            SELECT i.scene_id, i.device_id, i.position, f.name AS capability, i.created_at
+            FROM scene_items i
+            JOIN device_functions f ON f.id = i.function_id
+            ORDER BY i.scene_id, i.position
+            """).fetchall()
+        for row in rows:
+            group_id = f"sg_{secrets.token_hex(6)}"
+            conn.execute(
+                """
+                INSERT INTO scene_action_groups(id, scene_id, name, capability, position, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    group_id,
+                    row["scene_id"],
+                    row["capability"],
+                    row["capability"],
+                    row["position"],
+                    row["created_at"],
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO scene_action_targets(id, group_id, device_id, position, created_at)
+                VALUES (?, ?, ?, 0, ?)
+                """,
+                (f"st_{secrets.token_hex(6)}", group_id, row["device_id"], row["created_at"]),
+            )
 
     @staticmethod
     def _add_missing_audit_device_id(conn: sqlite3.Connection) -> None:

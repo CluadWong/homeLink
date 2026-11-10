@@ -64,7 +64,7 @@
 ### 2.1 健康检查
 
 **`GET /api/health`** — 存活探针，恒 200；同样受 Bearer 鉴权约束。
-成功：`{success:true,status:"ok",schema_version:1,trace_id}`。无请求参数、无副作用；`schema_version` 与 `SCHEMA_VERSION` 同值。
+成功：`{success:true,status:"ok",schema_version:3,trace_id}`。无请求参数、无副作用；`schema_version` 与 `SCHEMA_VERSION` 同值。
 
 ### 2.2 状态
 
@@ -141,7 +141,7 @@
 成功：`{records:[{created_at,action,device_id,result,reason,trace_id}], trace_id}`。
 `limit` 1–200（默认 50）；`result` 三值 `success` / `failed` / `all`（`all` 或缺省表示不筛选）；`device_id` 按 `audit_logs.device_id` **精确匹配**（空值记录不参与）。非法 → 400。
 
-### 2.10 Agent 能力（12）
+### 2.10 Agent 能力（15）
 
 前缀 `/api/agent`，成功统一返回 `{success, result, trace_id}`。请求头可选 `X-Actor`（≤ 64 字符，默认 `user`），只用于记录调用方，不参与鉴权；Agent 侧 MCP 客户端固定发送 `X-Actor: butler-agent`（`HOMELINK_ACTOR` 可覆盖）与每请求生成的 `X-Trace-Id`，审计按 `actor` 与 `trace_id` 串链。
 
@@ -153,8 +153,11 @@
 | 家庭快照 | `GET /api/agent/snapshot?room=` |
 | 控设备 | `POST /api/agent/control` |
 | 查命令结果 | `GET /api/agent/commands/{request_id}` |
+| 能力目录 | `GET /api/agent/capabilities` |
 | 场景列表 | `GET /api/agent/scenes` |
+| 场景详情 | `GET /api/agent/scenes/{scene_id}` |
 | 创建场景 | `POST /api/agent/scenes` |
+| 更新场景 | `PATCH /api/agent/scenes/{scene_id}` |
 | 删除场景 | `DELETE /api/agent/scenes/{scene_id}` |
 | 跑场景 | `POST /api/agent/scenes/{scene_id}/run`（可选 body `{confirm}`） |
 | 设备元数据 | `PUT /api/agent/devices/{device_id}/metadata` |
@@ -170,8 +173,15 @@
 - 高风险设备未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`；Agent 必须先复述并取得用户确认。
 - 网关不可达 → 503 `DEVICE_OFFLINE` 且命令记为 `failed`；超时 → 504；网关响应异常 → 502。
 - **重试策略：调用方不得自动重发。** `GATEWAY_TIMEOUT` 时信号可能已发出，自动重试会造成重复动作（风扇开关类为翻转语义）；`EXECUTION_FAILED / DEVICE_OFFLINE` 已明确未执行，可在用户重新确认后用**新的 `request_id`** 重发。重放旧 `request_id` 只会拿回原结果，不会再次发送。
-- 场景：`items` 1–20 条，创建时即解析功能；运行逐条发送并返回 `results`，整体 `status` 为 `sent / partial / failed`。场景 payload 附带风险聚合 `risk_level`（`low` / `high`）与 `contains_high_risk`（按场景内设备的 `risk_level` 聚合）。场景不引入触发条件与调度。
-- 跑场景接受可选 body `{confirm: false}`：无 body 按 `confirm=false` 处理，未声明字段 400 `INVALID_REQUEST`。`contains_high_risk=true` 的场景未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`，且不产生任何 `command_requests` 记录；确认后逐项发送，每条场景项只产生一条记录。
+- **场景模型**：`{scene_id, name, enabled, action_groups, triggers, items, risk_level, contains_high_risk, created_at, updated_at}`。场景是编排层，设备是执行层，两者只通过 `capability` 解耦。
+- `action_groups` 1–20 组，每组 `{group_id, name, capability, targets:[{device_id, device_name, room, function_id, command}]}`。`capability` 即能力名（功能名），同能力设备可放入同一组；创建/更新时逐台校验设备确实具备该能力，不支持 → 404 `NOT_FOUND`（提示缺少哪项能力），不会静默收录。同一组内设备重复 → 400。
+- `triggers` 0–10 个策略对象 `{trigger_id, type, enabled, config}`。`type` 四值 `manual / schedule / voice / device_state`，`config` 按类型校验：`schedule` 需 5 段 `cron`，`voice` 需非空 `phrases` 列表，`device_state` 需 `device_id`；`manual` 无额外要求。创建时不传 `triggers` 自动补一个 `manual`。四种触发器互不依赖，本期只有手动执行入口（`/run`），其余类型落库后由各自的调度/语音/状态入口命中。
+- `items` 是兼容旧契约的**扁平只读视图**（按动作组 → 目标展平），创建时可继续用 `items`（每项 `{device_id, command}` 各自成组），但 `items` 与 `action_groups` 必须且只能提供一种，且不接受通过 PATCH 写入。
+- `PATCH` 至少要修改 `name / enabled / action_groups / triggers` 之一；`action_groups` / `triggers` 传入即整组替换，省略表示保持原样。
+- **执行是尽力而为的**：先校验 `enabled`（停用 → 400 `INVALID_REQUEST`，不产生任何命令记录）→ 逐动作组、逐 target 解析能力 → 单台下发。单设备失败或离线只影响它自己，**不存在事务式全成功/全回滚**。
+- 逐设备结果 `{group_id, capability, device_id, device_name, command, status, request_id|error_code, message}`，`status` 为 `sent` / `failed` / `offline`（设备失去能力为 `failed` + `NOT_SUPPORTED`）；整体 `status` 为 `sent / partial / failed`；`summary` 给出 `{total, sent, failed, offline}`。
+- **能力目录** `GET /api/agent/capabilities` → `{count, capabilities:[{capability, device_count, devices:[{device_id, name, room, function_id}]}]}`，供场景编辑时过滤出支持该能力的设备。
+- 跑场景接受可选 body `{confirm: false}`：无 body 按 `confirm=false` 处理，未声明字段 400 `INVALID_REQUEST`。`contains_high_risk=true` 的场景未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`，且不产生任何 `command_requests` 记录；确认后逐 target 发送，每个 target 只产生一条记录。
 - 自动化规则本期不实现，固定 501 `NOT_SUPPORTED`。
 
 ## 3. 学码契约

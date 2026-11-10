@@ -579,6 +579,20 @@ jobs:
 - 测试：`tests/test_scheduler.py`（cron/持久化/去重/失败不重试）、`tests/test_daemon.py`
   （增删查、高风险确认、非法 cron、场景不存在、后端不可用、runner 行为）
 
+**场景编排补齐（2026-11-11）**：
+
+- `homelink.db` 升级到 v3：`scenes.enabled` / `updated_at`，新增
+  `scene_action_groups` / `scene_action_targets` / `scene_triggers`；旧 `scene_items`
+  原地转成一个动作组（能力 = 功能名）后删除，设备与码不重建
+- 场景 API 补齐 `GET /api/agent/scenes/{id}`、`PATCH /api/agent/scenes/{id}`、
+  `GET /api/agent/capabilities`；创建/更新时按能力校验目标设备，不支持则拒绝
+- 执行改为「校验 enabled → 逐动作组 → 逐 target 查能力 → 下发 → 按设备汇总」，
+  `status` 增加 `offline` 与 `summary`；尽力而为、不回滚
+- 触发器四类（manual / schedule / voice / device_state）只落库 + 校验 config，
+  本期只有 `/run` 手动入口；定时仍由 Agent 侧调度器到点调用
+- 测试：`tests/test_agent_api.py` 覆盖动作组 CRUD、能力过滤、停用拒绝、缺能力/离线
+  partial、触发器校验；`tests/test_schema.py` 覆盖 v2 → v3 迁移
+
 ---
 
 ## 7. P4：可选能力
