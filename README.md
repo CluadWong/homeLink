@@ -99,6 +99,7 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 | `OLLAMA_MODEL` | `qwen3.5:9b-q4_K_M` | 需支持 tool calling |
 | `HOMELINK_BASE_URL` | `http://127.0.0.1:8000` | 传给 MCP 子进程 |
 | `HOMELINK_API_TOKEN` | 空 | 与服务端 token 一致 |
+| `HOMELINK_LOG_LEVEL` | `INFO` | MCP 子进程 stderr JSONL 日志门槛（DEBUG/INFO/WARNING/ERROR） |
 | `AGENT_MAX_STEPS` | `6` | 单轮最多几跳工具调用 |
 | `AGENT_AUDIT_PATH` | `logs/agent-audit.jsonl` | 审计日志路径；设为 `off` 关闭 |
 | `AGENT_DEBUG` | 未设置 | 设为 `1` 打印工具调用明细 |

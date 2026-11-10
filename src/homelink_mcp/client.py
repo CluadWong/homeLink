@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import secrets
+import time
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
+from homelink_mcp import logging as mcp_logging
 from homelink_mcp.config import Settings
 from homelink_mcp.errors import HomeLinkError
 
@@ -53,10 +55,43 @@ class HomeLinkClient:
         *,
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
+        tool: str = "",
+    ) -> Any:
+        """发起一次请求并写一条 stderr JSONL 日志（ok / error_code / duration_ms）。"""
+        trace_id = secrets.token_hex(4)
+        started = time.perf_counter()
+        try:
+            result = await self._send(method, path, trace_id, params=params, body=body)
+        except HomeLinkError as exc:
+            mcp_logging.emit(
+                "request",
+                tool=tool,
+                ok=False,
+                error_code=exc.code,
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                trace_id=exc.trace_id or trace_id,
+            )
+            raise
+        mcp_logging.emit(
+            "request",
+            tool=tool,
+            ok=True,
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            trace_id=trace_id,
+        )
+        return result
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        trace_id: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
     ) -> Any:
         url = f"{self._settings.base_url}{_AGENT_PREFIX}{path}"
-        # 每次请求生成 trace_id：后端中间件会采纳传入的 X-Trace-Id，据此串起审计链。
-        trace_id = secrets.token_hex(4)
+        # trace_id 由 _request 生成：后端中间件会采纳传入的 X-Trace-Id，据此串起审计链。
         headers = {
             "Accept": "application/json",
             "X-Actor": self._settings.actor,
@@ -116,14 +151,20 @@ class HomeLinkClient:
             params["type"] = device_type
         if name:
             params["name"] = name
-        return await self._request("GET", "/devices", params=params or None)
+        return await self._request(
+            "GET", "/devices", params=params or None, tool="home_find_devices"
+        )
 
     async def get_device_state(self, device_id: str) -> dict[str, Any]:
-        return await self._request("GET", f"/devices/{quote(device_id, safe='')}/state")
+        return await self._request(
+            "GET",
+            f"/devices/{quote(device_id, safe='')}/state",
+            tool="home_get_device_state",
+        )
 
     async def snapshot(self, *, room: str | None = None) -> dict[str, Any]:
         params = {"room": room} if room else None
-        return await self._request("GET", "/snapshot", params=params)
+        return await self._request("GET", "/snapshot", params=params, tool="home_get_home_snapshot")
 
     async def control_device(
         self,
@@ -141,14 +182,17 @@ class HomeLinkClient:
             "request_id": request_id,
             "confirm": confirm,
         }
-        return await self._request("POST", "/control", body=body)
+        return await self._request("POST", "/control", body=body, tool="home_control_device")
 
     async def run_scene(self, scene_id: str, *, confirm: bool) -> dict[str, Any]:
         return await self._request(
             "POST",
             f"/scenes/{quote(scene_id, safe='')}/run",
             body={"confirm": confirm},
+            tool="home_run_scene",
         )
 
     async def create_automation(self, rule: dict[str, Any] | None = None) -> dict[str, Any]:
-        return await self._request("POST", "/automations", body={"rule": rule or {}})
+        return await self._request(
+            "POST", "/automations", body={"rule": rule or {}}, tool="home_create_automation"
+        )
