@@ -59,7 +59,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 - 确认 `GET /openapi.json` 可用且与 `api-contract.md` 一致（15 条路径 / 21 个端点、错误码、鉴权）。
 - 读取能力已够用：`GET /api/devices` 已返回每个设备的功能列表与房间内部名，房间显示名由 `GET /api/rooms` 提供；按名字定位放在 Agent 侧做本地匹配，M1 不新增搜索端点（确需新增时单独评审契约）。
 - 明确「一次调用」的边界：`POST /api/control` 只接受 `function_id`，不做参数校验，不含探测前置。
-- 运维：SQLite 备份 / 恢复脚本与 `logs/` 轮转；备份恢复后服务可独立启动。
+- 运维：SQLite 备份 / 恢复脚本与 `logs/` 轮转——已落地（`scripts/backup.py` 在线快照 + integrity_check + 保留裁剪，`scripts/restore.py` 先验后恢复、坏备份拒绝、旧库改名保留，`scripts/rotate_logs.py` copy-truncate 滚动），2026-11-10 已对运行中的生产库实测备份成功。
 
 **验收**：从空库开始，用 OpenAPI 生成的工具集完成「建设备 → 学码 → 调用 → 查状态 → 查审计」；恢复脚本可在新目录还原数据。
 

@@ -40,6 +40,18 @@ powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 - 卸载后旧任务保持停用；需要恢复时执行 `uninstall-service.ps1 -RestoreOldService`。
 - 只想立刻看地址：运行 `scripts\service\show-addresses.cmd`（或 `python scripts\addresses.py`）。
 
+### 备份与日志轮转
+
+```powershell
+python scripts\backup.py                  # 在线快照 data\homelink.db 到 backups\，保留最近 7 份
+python scripts\restore.py backups\homelink-20261110-142437.db --force   # 先停服务；旧库改名 .pre-restore-* 保留
+python scripts\rotate_logs.py             # logs\ 下超 5 MB 的 .log/.jsonl 滚动，保留 3 份
+```
+
+- 备份用 SQLite 在线快照，**服务不用停**；备份后自动做 integrity_check，坏文件不留。
+- 学码数据全在库里，建议隔几天跑一次 `backup.py`（可用计划任务定时），`--keep` 控制保留份数。
+- 恢复前先停服务；脚本会先校验备份、恢复后复检，坏备份直接拒绝且不动现有库。
+
 
 ## 配置
 

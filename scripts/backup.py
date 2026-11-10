@@ -1,0 +1,108 @@
+"""在线备份 SQLite 主库：服务不停也能拿到一致性快照。
+
+用法：
+    python scripts/backup.py                    # 备份到 backups/，保留最近 7 份
+    python scripts/backup.py --keep 14          # 保留最近 14 份
+    python scripts/backup.py --output-dir D:\\hl-backups
+
+原理：用 sqlite3 的 Connection.backup() 在线快照，WAL 未合并也能拿到一致数据；
+备份后立即做 integrity_check，坏文件不留进备份目录。
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_KEEP = 7
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def resolve_db_path() -> Path:
+    """与服务端同源：HOMELINK_DB_PATH 优先，否则仓库 data/homelink.db。"""
+
+    raw = os.environ.get("HOMELINK_DB_PATH", "").strip()
+    if raw:
+        return Path(raw)
+    return _repo_root() / "data" / "homelink.db"
+
+
+def _check_database(path: Path) -> tuple[str, int]:
+    """返回 (integrity 结果, schema 版本)，供备份后与恢复后各验一次。"""
+
+    conn = sqlite3.connect(path)
+    try:
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+        version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        conn.close()
+    return integrity, version
+
+
+def backup_db(db_path: Path, output_dir: Path, keep: int) -> Path:
+    """在线快照到 output_dir，校验后裁剪旧份，返回备份文件路径。"""
+
+    if not db_path.exists():
+        raise FileNotFoundError(f"数据库不存在：{db_path}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / f"homelink-{time.strftime('%Y%m%d-%H%M%S')}.db"
+
+    source = sqlite3.connect(db_path)
+    try:
+        snapshot = sqlite3.connect(target)
+        try:
+            source.backup(snapshot)
+        finally:
+            snapshot.close()
+    finally:
+        source.close()
+
+    integrity, version = _check_database(target)
+    if integrity != "ok":
+        target.unlink(missing_ok=True)
+        raise RuntimeError(f"备份校验失败（{integrity}），已删除坏文件：{target}")
+
+    prune_backups(output_dir, keep)
+    return target
+
+
+def prune_backups(output_dir: Path, keep: int) -> list[Path]:
+    """按文件名（即时间戳）倒序保留 keep 份，返回被删除的文件。"""
+
+    backups = sorted(output_dir.glob("homelink-*.db"), reverse=True)
+    removed = backups[keep:]
+    for old in removed:
+        old.unlink(missing_ok=True)
+    return removed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="HomeLink SQLite 在线备份")
+    parser.add_argument("--output-dir", type=Path, default=_repo_root() / "backups")
+    parser.add_argument("--keep", type=int, default=DEFAULT_KEEP)
+    args = parser.parse_args()
+
+    db_path = resolve_db_path()
+    try:
+        target = backup_db(db_path, args.output_dir, max(1, args.keep))
+    except (FileNotFoundError, RuntimeError, sqlite3.Error) as exc:
+        print(f"备份失败：{exc}", file=sys.stderr)
+        return 1
+
+    integrity, version = _check_database(target)
+    size_kb = target.stat().st_size / 1024
+    print(f"备份完成：{target}")
+    print(f"  完整性 {integrity}，schema v{version}，{size_kb:.0f} KB")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

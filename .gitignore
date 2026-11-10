@@ -10,6 +10,7 @@ config/*.local.yaml
 homelink.egg-info/
 
 logs/
+backups/
 node_modules/
 frontend/node_modules/
 frontend/dist/
