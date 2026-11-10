@@ -249,7 +249,16 @@ def create_agent_app(
         session_id = payload.session_id or uuid.uuid4().hex[:12]
         item = store.get(session_id)
         started = time.perf_counter()
-        async with lock:  # 串行执行；等待期间会话不会被淘汰（TTL 按 last_used）
+        # 背压：最多排队 queue_timeout 秒，超时直接 429 拒绝，不丢请求也不重复执行
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=settings.queue_timeout)
+        except TimeoutError as exc:
+            metrics.record_request(error=True, latency_ms=_elapsed_ms(started))
+            raise HTTPException(
+                status_code=429,
+                detail=f"模型忙：等待超过 {settings.queue_timeout:g} 秒，请稍后重试",
+            ) from exc
+        try:
             try:
                 reply = await item["agent"].respond(
                     conn.session, conn.tools, payload.message, item["history"]
@@ -264,6 +273,8 @@ def create_agent_app(
                     status_code=502,
                     detail=f"本轮失败（{exc}）；连接已重置，请重试。上一条命令如已发出不会重复。",
                 ) from exc
+        finally:
+            lock.release()
         metrics.record_request(error=False, latency_ms=_elapsed_ms(started))
         history: list[dict[str, str]] = item["history"]
         history.append({"role": "user", "content": payload.message})

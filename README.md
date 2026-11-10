@@ -106,6 +106,7 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 | `AGENT_KEEP_ALIVE` | `30m` | 模型驻留时长（透传 Ollama `keep_alive`） |
 | `AGENTD_HOST` / `AGENTD_PORT` | `127.0.0.1` / `8100` | daemon 监听地址 |
 | `AGENTD_TOKEN` | 空 | 非空时除 `/api/health` 外全部要求 `Authorization: Bearer <token>` |
+| `AGENTD_QUEUE_TIMEOUT` | `30`（秒） | 模型锁排队上限，超时返回 429 |
 | `AGENTD_SESSION_TTL` | `120`（分钟） | 会话闲置多久后淘汰 |
 | `AGENTD_MAX_SESSIONS` | `20` | 最多同时保留几个会话（LRU 淘汰） |
 

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -296,3 +298,53 @@ def test_bearer_auth_off_when_token_empty(
 ) -> None:
     with _client(FakeConnection(), settings=_settings()) as client:
         assert client.post("/api/chat", json={"message": "hi"}).status_code == 200
+
+
+# ---------------------------------------------------------------- 队列与背压
+
+
+def _post_pair(monkeypatch: pytest.MonkeyPatch, queue_timeout: float) -> Any:
+    """并发两个 chat 请求：第一个先持锁，第二个排队。"""
+    seen: list[list[dict[str, Any]]] = []
+
+    async def recording_slow_chat(
+        settings: AgentSettings,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        seen.append(messages)
+        await asyncio.sleep(0.5)
+        return {"content": "慢"}
+
+    monkeypatch.setattr(agent_mod, "chat", recording_slow_chat)
+    app = create_agent_app(
+        _settings(queue_timeout=queue_timeout), connection=FakeConnection(), warmup=False
+    )
+
+    async def scenario() -> Any:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            first = asyncio.create_task(ac.post("/api/chat", json={"message": "第一个"}))
+            await asyncio.sleep(0.25)  # 第一个已持锁执行中
+            second = await ac.post("/api/chat", json={"message": "第二个"})
+            return await first, second, len(seen)
+
+    return asyncio.run(scenario())
+
+
+def test_queue_timeout_returns_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    first, second, executed = _post_pair(monkeypatch, queue_timeout=0.2)
+
+    assert second.status_code == 429
+    assert "模型忙" in second.json()["detail"]
+    assert first.status_code == 200  # 不丢请求：先到的正常完成
+    assert executed == 1  # 被拒的不执行，也不重复执行
+
+
+def test_queue_waits_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    first, second, executed = _post_pair(monkeypatch, queue_timeout=3.0)
+
+    assert first.status_code == 200
+    assert second.status_code == 200  # 排队等到锁，正常执行
+    assert second.json()["reply"] == "慢"
+    assert executed == 2
