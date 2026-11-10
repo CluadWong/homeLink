@@ -3,16 +3,17 @@
 本文件规划「红外设备管家（执行层）」到「上层智能管家 Agent」的演进顺序与验收口径。
 定位不变：本仓库负责设备、学码、单次回放、虚拟状态与审计；**Agent 是独立进程**，只通过 HTTP 调用本服务，不进入 `homelink` 包、不直接读写 SQLite。
 
-## 现状基线（2026-11-09）
+## 现状基线（2026-11-10）
 
 | 项 | 现状 |
 | --- | --- |
-| 后端 | FastAPI 单进程 + 单 SQLite；15 条路径 / 21 个端点，7 个错误码，`X-Trace-Id` 全链路 |
+| 后端 | FastAPI 单进程 + 单 SQLite（schema v2）；15 条路径 / 33 个端点（21 传统 + 12 Agent），11 个错误码，`X-Trace-Id` 全链路 |
+| Agent 接口 | `/api/agent/*` 粗粒度命名空间：设备模型含 `type/room/aliases/risk_level/capabilities/state`，`request_id` 幂等，场景仅顺序执行 |
+| 工具面 | `src/homelink_mcp` 把 6 个能力封装成 MCP 工具（stdio）；`src/homelink_agent` 是本地 Ollama 侧车，工具 schema 由 `tools/list` 动态生成 |
 | 前端 | Vue 3 正式前端已构建并由后端同源托管；Streamlit 六页保留但非启动入口 |
 | 硬件 | 一台 ESPHome 红外网关；`mock` / `real` 只靠配置切换 |
-| 验证 | 全量 pytest 202 passed；学码 / 回放链路已在真机复测通过；传感器未接入 |
+| 验证 | 全量 pytest 233 passed；ruff / black / mypy 全绿；真实板子只做只读探测，从未发送真实红外 |
 | 运维 | 开机静默自启（计划任务 `HomeLinkService`）+ 登录后地址展示（`HomeLinkAddresses`） |
-| 已知遗留 | 全仓 black 有 2 个历史文件待格式化、mypy 有 1 处历史报错；`src/brain|core|gateway` 为空的残留目录 |
 
 ## 总体原则
 
@@ -28,6 +29,15 @@
 M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent MVP ──▶ M4 语音入口
                                                    └──▶ M5 自动化 / 多网关（按需）
 ```
+
+| 里程碑 | 状态 | 落地情况 |
+| --- | --- | --- |
+| M0 收口 | 完成 | 空目录已删、历史门禁问题已修、remote 可用 |
+| M1 工具层 | 完成（换了形态） | 没有走「OpenAPI 自动生成几十个工具」，改为 `/api/agent` 6 个粗粒度能力 + 统一 envelope |
+| M2 语义与安全 | 完成 | 统一设备 ID/房间/别名、能力描述、`request_id` 幂等、高风险确认、11 个错误码、审计 |
+| M3 Agent MVP | MVP 完成 | `homelink_mcp`（6 工具）+ `homelink_agent`（Ollama `qwen3.5:9b`），运行时拦截模型自补确认 |
+| M4 语音入口 | 未开始 | 依赖文本链路继续稳定 |
+| M5 自动化 | 部分 | 场景已恢复（仅按顺序执行一组功能）；定时/规则仍返回 501 |
 
 ### M0 收口现状
 
@@ -68,19 +78,20 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 
 **不做**：不改变 `unknown` / `confirmed` 语义，不引入「设备在线」判定。
 
-### M3 Agent 侧车 MVP（Ollama `qwen3.5:4b`）
+### M3 Agent 侧车 MVP（已落地，Ollama `qwen3.5:9b`）
 
 **目标**：本地对话完成「找到设备 → 找到功能 → 确认 → 调用」的最小闭环。
 
-- 新目录 `agent/`，独立进程，通过 HTTP 调用本服务；不 import `homelink`、不访问数据库文件。
-- 工具集控制在 5–8 个：`list_devices`、`list_functions`、`control`、`get_state`、`correct_state`、`get_audit`。
-- 工具参数只保留 `device_id` / `function_id` 等简单字段；工具描述短、枚举明确，适配 4B 模型的工具调用能力。
-- 兜底策略：意图分类用窄集合 + 规则 / 词表；模型输出无法解析时降级为反问。
-- 不依赖云端模型与外部网络。
+实际形态（与初稿的差异）：
 
-**验收**（建议阈值，按实测定稿）：50 条中文指令评测，工具选择准确率 ≥ 90%；未知指令误发 0 次；失败均有人话原因与下一步。
+- 没有新建 `agent/`，而是拆成两层：`src/homelink_mcp` 把 6 个粗粒度能力封装成 MCP 工具（stdio），`src/homelink_agent` 消费 MCP 并驱动 Ollama。
+- 工具面固定为 6 个：`home_find_devices`、`home_get_device_state`、`home_get_home_snapshot`、`home_control_device`、`home_run_scene`、`home_create_automation`（固定 501）。工具 schema 不写死，由 MCP `tools/list` 动态转成 Ollama 格式。
+- Agent 不 import `homelink`、不访问数据库，只经 `homelink-mcp` 子进程发 HTTP；本机模型名可用 `OLLAMA_MODEL` 覆盖。
+- 兜底策略：高风险设备由运行时拦截——模型不能自己补 `confirm=true`，只有「上一轮被拦下的同一设备 + 本轮用户明确同意」才放行；其余一律降级为 `confirm=false`，由服务端返回 409。
 
-**不做**：不做长期记忆、不做多轮复杂规划、不做自动重试发送。
+**已验收**：mock 网关下三条链路实测通过——查状态（`find_devices` → `get_device_state`，答「unknown」）、控制（`control` → 「信号已发出」）、不支持的功能（无灯具 / 无法调亮度，未误调）。高风险场景：无同意时 `command_requests` 计数不变；「打开 → 同意」两轮里只在第二轮产生一条 `sent`。
+
+**待补**：50 条中文指令的准确率评测尚未做；长期记忆、多轮复杂规划、自动重试仍不做。
 
 ### M4 语音入口（可选）
 
@@ -93,7 +104,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 
 ### M5 自动化与多网关（按需，最后做）
 
-- 场景 / 定时此前已下架。若恢复，应作为 Agent 侧调度器，通过 `POST /api/control` 执行，不回到本服务。
+- 场景已恢复，但只支持「按顺序执行一组已有功能」（`POST /api/agent/scenes/{id}/run`），不引入调度器；定时 / 规则仍返回 501。若要做定时，应由 Agent 侧调度，通过 HTTP 触发场景，不回到本服务。
 - 多网关需要把 `gateway` 从单实例改为多实例，会触及配置、探测与调用路由，属于 v2 契约变更，需单独设计评审。
 
 **验收**：按最终选定的范围另行补充；未选定前不排期。
@@ -102,7 +113,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 
 | 问题 | 影响 | 建议 |
 | --- | --- | --- |
-| 是否恢复场景 / 定时 | 决定 M5 是否启动 | 先用 Agent 单次指令验证需求 |
+| 是否恢复场景 / 定时 | 决定 M5 是否启动 | 已决策：场景恢复为「顺序执行一组功能」，定时不做 |
 | 是否支持多网关 | 决定是否进入 v2 契约 | 单网关够用时不做 |
 | 是否引入语音 | 决定 M4 优先级 | 文本链路稳定后再做 |
 | Agent 是否需要来源标识 | 影响审计字段 | 默认不加，审计已可按 `trace_id` 串联 |

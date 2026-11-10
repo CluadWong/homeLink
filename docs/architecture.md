@@ -51,6 +51,8 @@
 | 面 | 形态 | 用途 | 是否契约 |
 | --- | --- | --- | --- |
 | HTTP API | 33 个端点（旧 21 + Agent 12） | 唯一程序化入口 | 是，见 `api-contract.md` |
+| MCP 工具面 | `src/homelink_mcp`，6 个工具，stdio | Agent 侧接入方式，经 HTTP 调 `/api/agent` | 否，可替换 |
+| 本地管家 Agent | `src/homelink_agent`，消费 MCP + Ollama | 文本对话入口 | 否 |
 | 配置目录 | `settings*.yaml`、`devices.yaml`（仅房间种子） | 部署期输入 | 是 |
 | 数据目录 | 一个 SQLite 文件 | 持久化 | 否，外部不得直连 |
 
@@ -69,6 +71,8 @@ src/homelink/
   interface/api/  router，见 `api-contract.md`（`/api/*` 旧端点 + `/api/agent/*` 粗粒度端点）
   interface/clients/streamlit/  过渡客户端
   agent_future/ 已停用，禁止引用
+src/homelink_mcp/  MCP 工具壳：只调 /api/agent，不 import homelink；mcp 为可选依赖
+src/homelink_agent/ 本地管家 Agent：spawn homelink-mcp 子进程 + Ollama，工具 schema 动态生成
 config/          settings / devices（房间种子）+ *.local.yaml
 hardware/ir-codes/  设备侧历史归档，不作为数据源
 ```
@@ -84,6 +88,7 @@ hardware/ir-codes/  设备侧历史归档，不作为数据源
 - **ADR-05 配置写入唯一入口**：必须经 `ConfigService`，否则并发写坏文件且 `config_audit` 断链。
 - **ADR-06 学码复用设备**：设备由设备页创建，`start` 只开会话；`cancel` 与 TTL 只停接收态，不增删设备。
 - **ADR-07 Agent 粗粒度命名空间**：`/api/agent/*` 是面向 Agent 的门面，端点少、参数少、统一 envelope；旧 `/api/*` 原样保留给前端与脚本，二者共用同一批服务对象，不存在第二套状态机。
+- **ADR-08 工具面与 Agent 都不进主包**：`homelink_mcp` / `homelink_agent` 是可选依赖的独立包，只经 `/api/agent` 交互；高风险确认由 Agent 运行时兜底（模型不能自补 `confirm=true`），服务端的 `confirm` 校验仍是最后一道闸门。
 
 ## 6. 失败隔离
 
