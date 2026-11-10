@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, NamedTuple
 
 from mcp.client.stdio import stdio_client
@@ -25,6 +25,11 @@ _CONSENT_WORDS = frozenset(
 )
 _DENY_WORDS = frozenset({"取消", "不要", "不行", "别", "不"})
 _DEBUG = os.environ.get("AGENT_DEBUG") == "1"
+
+# 与 llm.chat 同契约：给定 settings / messages / tools，返回含 content 或 tool_calls 的消息
+ChatFn = Callable[
+    [AgentSettings, list[dict[str, Any]], list[dict[str, Any]]], Awaitable[dict[str, Any]]
+]
 
 
 class _Pending(NamedTuple):
@@ -73,9 +78,12 @@ class HomeAgent:
         self,
         settings: AgentSettings,
         on_tool: Callable[[str, dict[str, Any], str], None] | None = None,
+        chat_fn: ChatFn | None = None,
     ) -> None:
         self._settings = settings
         self._on_tool = on_tool
+        # 默认走 Ollama；评测可用云端模型替换（契约同 llm.chat）
+        self._chat = chat_fn or chat
         self._audit = AuditLog(settings.audit_path)
         self._pending_device: _Pending | None = None
         self._pending_scene: _Pending | None = None
@@ -135,7 +143,7 @@ class HomeAgent:
 
         try:
             for _ in range(self._settings.max_steps):
-                message = await chat(self._settings, messages, tools)
+                message = await self._chat(self._settings, messages, tools)
                 calls = message.get("tool_calls") or []
                 if not calls:
                     reply = str(message.get("content") or "").strip() or "（模型没有返回内容）"

@@ -73,8 +73,9 @@ Agent
   tests/test_daemon.py                             常驻服务测试
 
 评测
-  scripts/agent_eval_set.json                      50 条用例
-  scripts/eval_agent.py                            工具选择评测
+  src/homelink_agent/evaluation.py                 判定规则与指标（纯逻辑，可单测）
+  scripts/agent_eval_set.json                      130 条用例（7 分类）
+  scripts/eval_agent.py                            安全 + 话术 + 延迟评测驱动
 
 契约文档
   docs/agent-tools.md                              系统提示 + 6 工具 schema
@@ -457,13 +458,13 @@ jobs:
 
 **实施要点**：
 
-1. 用例扩到 120 至 150 条，分类：
+1. 用例扩到 120 至 150 条（实际 130 条），分类：
    - 查询（20）
    - 控制（30）
    - 歧义/澄清（20）
    - 高风险确认（15）
    - 不支持能力（20）
-   - 失败与重试（15）
+   - 诚实陈述/不臆断（15）
    - 多轮（10）
 2. 用例字段扩展：
 
@@ -486,6 +487,8 @@ jobs:
    - P50 / P95 延迟
    - 模型异常数
 4. 输出 `docs/eval-report.md`（执行时生成，含日期、模型名、通过率、失败明细）。
+   评测必须用云端 OpenAI 兼容模型（`EVAL_CLOUD_BASE_URL` / `EVAL_CLOUD_API_KEY` / `--model`）；
+   本地 9B 只用于链路冒烟，不用于批量评测。
 
 **验收**：
 
