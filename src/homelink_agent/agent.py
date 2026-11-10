@@ -13,7 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from homelink_agent.config import AgentSettings
-from homelink_agent.llm import chat, to_ollama_tool
+from homelink_agent.llm import OllamaError, chat, to_ollama_tool
 from homelink_agent.prompt import SYSTEM_PROMPT, history_messages
 
 _CONSENT_RE = re.compile(r"确认|确定|同意|可以|好的|好|是的|开吧|执行|没问题")
@@ -30,6 +30,17 @@ def _looks_like_consent(text: str) -> bool:
 
     stripped = text.strip()
     return len(stripped) <= 12 and _CONSENT_RE.search(stripped) is not None
+
+
+def _unwrap(group: BaseExceptionGroup) -> BaseException:
+    """优先返回组里的 OllamaError，否则返回第一个叶子异常。"""
+
+    for inner in group.exceptions:
+        found = _unwrap(inner) if isinstance(inner, BaseExceptionGroup) else inner
+        if isinstance(found, OllamaError):
+            return found
+    leaf = group.exceptions[0]
+    return _unwrap(leaf) if isinstance(leaf, BaseExceptionGroup) else leaf
 
 
 class HomeAgent:
@@ -59,28 +70,34 @@ class HomeAgent:
             env=self._server_env(),
         )
         with open(os.devnull, "w", encoding="utf-8") as errlog:
-            async with (
-                stdio_client(params, errlog=errlog) as (read, write),
-                ClientSession(read, write) as session,
-            ):
-                await session.initialize()
-                tools = [to_ollama_tool(tool) for tool in (await session.list_tools()).tools]
+            try:
+                async with (
+                    stdio_client(params, errlog=errlog) as (read, write),
+                    ClientSession(read, write) as session,
+                ):
+                    await session.initialize()
+                    tools = [to_ollama_tool(tool) for tool in (await session.list_tools()).tools]
 
-                for _ in range(self._settings.max_steps):
-                    message = await chat(self._settings, messages, tools)
-                    calls = message.get("tool_calls") or []
-                    if not calls:
-                        return str(message.get("content") or "").strip() or "（模型没有返回内容）"
+                    for _ in range(self._settings.max_steps):
+                        message = await chat(self._settings, messages, tools)
+                        calls = message.get("tool_calls") or []
+                        if not calls:
+                            return (
+                                str(message.get("content") or "").strip() or "（模型没有返回内容）"
+                            )
 
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": str(message.get("content") or ""),
-                            "tool_calls": calls,
-                        }
-                    )
-                    for call in calls:
-                        messages.append(await self._call_tool(session, call, previous_pending))
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": str(message.get("content") or ""),
+                                "tool_calls": calls,
+                            }
+                        )
+                        for call in calls:
+                            messages.append(await self._call_tool(session, call, previous_pending))
+            except BaseExceptionGroup as group:
+                # anyio 任务组会把模型/网络异常包成 ExceptionGroup，剥出来再抛
+                raise _unwrap(group) from None
 
         return "（指令拆得太复杂，已到最大步数；请一次只做一件事）"
 

@@ -18,7 +18,6 @@ from pathlib import Path
 
 from homelink_agent.agent import HomeAgent
 from homelink_agent.config import AgentSettings, load_settings
-from homelink_agent.llm import OllamaError
 
 DATASET = Path(__file__).with_name("agent_eval_set.json")
 
@@ -70,10 +69,10 @@ async def main() -> int:
         text = str(case["text"])
         try:
             calls, reply = await run_case(settings, case)
-        except OllamaError as exc:
+        except Exception as exc:
             errors += 1
             failures.append(f"[{index:02d}] 模型异常：{text}（{exc}）")
-            print(f"[{index:02d}] ERROR {text}")
+            print(f"[{index:02d}] ERROR {text}（{exc}）")
             continue
 
         reasons = judge(case, calls)
