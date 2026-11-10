@@ -90,8 +90,13 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 | `POST /api/chat` | `{"message": "...", "session_id": "..."}` → `{"reply", "session_id"}`；`session_id` 省略则新建 |
 | `GET /api/health` | 连接、模型、会话数 |
 | `DELETE /api/sessions/{id}` | 主动丢弃会话（含未完成的高风险确认） |
+| `POST /api/schedules` | `{"scene_id", "cron", "enabled", "confirm"}` → 新建定时任务（5 段 cron，本机时区） |
+| `GET /api/schedules` | 列出全部定时任务与最近一次执行结果 |
+| `DELETE /api/schedules/{id}` | 删除定时任务 |
 
 掉线语义：MCP 掉线时该轮返回 502 并重置连接，**不自动重发**（避免红外重复发送）；Ollama 不可用返回 503。
+
+定时任务存独立 SQLite（`data/agent.db`，不碰 `homelink.db`），到点经 MCP 执行一次场景；执行失败只写审计（`schedule_run` / `schedule_error`），不自动重试。含高风险设备的场景在创建时必须 `confirm=true`，若之后风险升级而创建时未授权，到点会跳过并记审计。定时能力不进 MCP 工具面，避免影响工具选择准确率。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -109,8 +114,9 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 | `AGENTD_QUEUE_TIMEOUT` | `30`（秒） | 模型锁排队上限，超时返回 429 |
 | `AGENTD_SESSION_TTL` | `120`（分钟） | 会话闲置多久后淘汰 |
 | `AGENTD_MAX_SESSIONS` | `20` | 最多同时保留几个会话（LRU 淘汰） |
+| `AGENTD_DB_PATH` | `data/agent.db` | 定时任务库（独立于 `homelink.db`） |
 
-审计日志逐行记录 `turn_start` / `tool_call` / `confirm_requested` / `confirm_granted` / `confirm_denied` / `confirm_expired` / `turn_end` / `turn_error`，每条带时间戳与参数，用于回溯「谁在什么时候让 Agent 做了什么」。
+审计日志逐行记录 `turn_start` / `tool_call` / `confirm_requested` / `confirm_granted` / `confirm_denied` / `confirm_expired` / `turn_end` / `turn_error` / `schedule_created` / `schedule_deleted` / `schedule_run` / `schedule_error` / `shutdown`，每条带时间戳与参数，用于回溯「谁在什么时候让 Agent 做了什么」。
 
 高风险设备（`risk_level=high`）由运行时兜底：模型不能自己补 `confirm=true`，只有「上一轮被拦下的同一设备 + 本轮用户明确同意」才放行；其他情况一律降级为 `confirm=false`，由服务端返回 409。
 

@@ -14,22 +14,27 @@
     GET  /api/health          连接、模型、会话数
     GET  /api/metrics         进程内计数：请求数 / 错误数 / 工具调用数 / 耗时分位
     DELETE /api/sessions/{id} 主动丢弃会话（含未完成的高风险确认）
+    POST /api/schedules       {"scene_id", "cron", "enabled", "confirm"} → 新建定时任务
+    GET  /api/schedules       列出全部定时任务
+    DELETE /api/schedules/{id} 删除定时任务
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import math
 import os
 import sys
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from mcp.client.stdio import stdio_client
@@ -40,6 +45,13 @@ from homelink_agent.agent import HomeAgent
 from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings, load_settings
 from homelink_agent.llm import OllamaError, to_ollama_tool, warm_model
+from homelink_agent.scheduler import (
+    Schedule,
+    Scheduler,
+    ScheduleStore,
+    dump_schedule,
+    validate_cron,
+)
 from homelink_mcp.config import DEFAULT_ACTOR
 from mcp import ClientSession, StdioServerParameters
 
@@ -58,6 +70,75 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str
     reply: str
+
+
+class ScheduleRequest(BaseModel):
+    scene_id: str = Field(min_length=1, max_length=64)
+    cron: str = Field(min_length=1, max_length=64)
+    enabled: bool = True
+    confirm: bool = False
+
+
+SceneLookup = Callable[[str], Awaitable[dict[str, Any] | None]]
+
+
+def _backend_scene_lookup(settings: AgentSettings) -> SceneLookup:
+    """默认从后端读场景清单，用来校验场景是否存在与是否含高风险设备。"""
+
+    async def lookup(scene_id: str) -> dict[str, Any] | None:
+        headers = {"X-Actor": DEFAULT_ACTOR}
+        if settings.homelink_token:
+            headers["Authorization"] = f"Bearer {settings.homelink_token}"
+        async with httpx.AsyncClient(base_url=settings.homelink_base_url, timeout=10.0) as client:
+            response = await client.get("/api/agent/scenes", headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+        scenes = (payload.get("result") or {}).get("scenes") or []
+        for scene in scenes:
+            if isinstance(scene, dict) and scene.get("id") == scene_id:
+                return scene
+        return None
+
+    return lookup
+
+
+def _tool_text(result: Any) -> str:
+    return "\n".join(
+        getattr(block, "text", "")
+        for block in result.content
+        if getattr(block, "type", "") == "text"
+    )
+
+
+def _schedule_runner(
+    conn: McpConnection, lookup: SceneLookup
+) -> Callable[[Schedule], Awaitable[None]]:
+    """到点执行：复查风险后经 MCP 跑场景；失败抛错由 Scheduler 记审计且不重试。"""
+
+    async def run(schedule: Schedule) -> None:
+        scene = await lookup(schedule.scene_id)
+        if scene is None:
+            raise RuntimeError(f"场景不存在：{schedule.scene_id}")
+        if scene.get("contains_high_risk") and not schedule.confirm:
+            raise PermissionError("场景已升级为高风险且创建时未授权，跳过本次执行")
+        await conn.ensure()
+        if conn.session is None:
+            raise RuntimeError("MCP 未连接")
+        result = await conn.session.call_tool(
+            "home_run_scene", {"scene_id": schedule.scene_id, "confirm": True}
+        )
+        text = _tool_text(result)
+        if result.isError:
+            raise RuntimeError(text or "场景执行失败")
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            raise RuntimeError("场景执行返回不是 JSON") from None
+        status = payload.get("status") if isinstance(payload, dict) else None
+        if status in {"partial", "failed"}:
+            raise RuntimeError(f"场景执行 {status}")
+
+    return run
 
 
 class McpConnection:
@@ -214,11 +295,25 @@ def create_agent_app(
     settings: AgentSettings,
     connection: McpConnection | None = None,
     warmup: bool = True,
+    *,
+    start_scheduler: bool = True,
+    scene_lookup: SceneLookup | None = None,
 ) -> FastAPI:
-    """connection/warmup 参数供测试注入；生产路径全部走默认值。"""
+    """connection/warmup/start_scheduler/scene_lookup 参数供测试注入；生产路径全走默认值。"""
+
+    own_connection = connection is None
+    conn = connection if connection is not None else McpConnection(settings)
+    metrics = Metrics()
+    store = SessionStore(settings, on_tool=metrics.on_tool)
+    lock = asyncio.Lock()  # 9B 模型一次只能跑一个请求，串行化避免显存争抢
+    audit = AuditLog(settings.audit_path)
+    schedules = ScheduleStore(settings.agent_db_path)
+    lookup = scene_lookup or _backend_scene_lookup(settings)
+    scheduler = Scheduler(schedules, _schedule_runner(conn, lookup), audit=audit)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        task: asyncio.Task[None] | None = None
         if own_connection:
             await conn.start()
             if warmup:
@@ -226,26 +321,25 @@ def create_agent_app(
                     await warm_model(settings)
                 except OllamaError as exc:  # 预热失败不拦启动，首轮提问会给出同样报错
                     print(f"警告：{exc}", file=sys.stderr, flush=True)
+        if start_scheduler:
+            task = asyncio.create_task(scheduler.run())
         try:
             yield
         finally:
             # 优雅退出（SIGTERM / Ctrl+C 走 uvicorn 的 lifespan shutdown）：
-            # 会话存储直接清空（确认状态随进程结束，绝不跨重启保留高风险授权），
-            # 再关 MCP 子进程与其内部 HTTP 连接池。
+            # 先停调度（不再发起新的红外指令），再清会话与连接。
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
             sessions = len(store)
             store.clear()
             if own_connection:
                 await conn.stop()
-            AuditLog(settings.audit_path).write(
-                "shutdown", sessions=sessions, mcp_connected=conn.connected
-            )
+            schedules.close()
+            audit.write("shutdown", sessions=sessions, mcp_connected=conn.connected)
 
     app = FastAPI(title="HomeLink Agent Daemon", lifespan=lifespan)
-    own_connection = connection is None
-    conn = connection if connection is not None else McpConnection(settings)
-    metrics = Metrics()
-    store = SessionStore(settings, on_tool=metrics.on_tool)
-    lock = asyncio.Lock()  # 9B 模型一次只能跑一个请求，串行化避免显存争抢
 
     @app.middleware("http")
     async def bearer_auth(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -322,6 +416,51 @@ def create_agent_app(
     @app.delete("/api/sessions/{session_id}")
     async def drop_session(session_id: str) -> dict[str, bool]:
         return {"dropped": store.drop(session_id)}
+
+    @app.post("/api/schedules")
+    async def create_schedule(payload: ScheduleRequest) -> dict[str, Any]:
+        try:
+            validate_cron(payload.cron)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"cron 表达式不合法：{exc}") from exc
+        try:
+            scene = await lookup(payload.scene_id)
+        except Exception as exc:  # 后端不可用时不落库，避免创建无法校验的计划
+            raise HTTPException(status_code=502, detail=f"无法读取场景：{exc}") from exc
+        if scene is None:
+            raise HTTPException(status_code=404, detail=f"场景不存在：{payload.scene_id}")
+        if scene.get("contains_high_risk") and not payload.confirm:
+            # 高风险场景必须由用户在创建时明确授权，之后到点执行才允许 confirm=true
+            raise HTTPException(
+                status_code=409, detail="场景含高风险设备：创建定时任务需要 confirm=true"
+            )
+        schedule = schedules.add(
+            scene_id=payload.scene_id,
+            cron=payload.cron,
+            enabled=payload.enabled,
+            confirm=payload.confirm,
+        )
+        audit.write(
+            "schedule_created",
+            schedule_id=schedule.id,
+            scene_id=schedule.scene_id,
+            cron=schedule.cron,
+            enabled=schedule.enabled,
+            confirm=schedule.confirm,
+        )
+        return dump_schedule(schedule)
+
+    @app.get("/api/schedules")
+    async def list_schedules() -> dict[str, Any]:
+        items = [dump_schedule(schedule) for schedule in schedules.list_all()]
+        return {"count": len(items), "schedules": items}
+
+    @app.delete("/api/schedules/{schedule_id}")
+    async def delete_schedule(schedule_id: str) -> dict[str, bool]:
+        deleted = schedules.delete(schedule_id)
+        if deleted:
+            audit.write("schedule_deleted", schedule_id=schedule_id)
+        return {"deleted": deleted}
 
     return app
 

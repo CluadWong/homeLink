@@ -7,7 +7,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -15,17 +15,25 @@ from fastapi.testclient import TestClient
 
 from homelink_agent import agent as agent_mod
 from homelink_agent.config import AgentSettings, load_settings
-from homelink_agent.daemon import McpConnection, Metrics, SessionStore, create_agent_app
+from homelink_agent.daemon import (
+    McpConnection,
+    Metrics,
+    SessionStore,
+    _schedule_runner,
+    create_agent_app,
+)
 from homelink_agent.llm import OllamaError
+from homelink_agent.scheduler import Schedule, ScheduleStore
 from mcp import ClientSession
 
 
 def _settings(**overrides: Any) -> AgentSettings:
-    # 审计与 token 默认关闭/清空，避免宿主机环境变量影响测试；相关用例显式传入
+    # 审计与 token 默认关闭/清空，调度库默认内存，避免宿主机环境变量与真实文件影响测试
     return replace(
         load_settings(),
         audit_path=overrides.pop("audit_path", "off"),
         daemon_token=overrides.pop("daemon_token", ""),
+        agent_db_path=overrides.pop("agent_db_path", ":memory:"),
         **overrides,
     )
 
@@ -68,8 +76,20 @@ def fake_chat(monkeypatch: pytest.MonkeyPatch) -> list[list[dict[str, Any]]]:
     return seen
 
 
-def _client(fake_conn: FakeConnection, settings: AgentSettings | None = None) -> TestClient:
-    return TestClient(create_agent_app(settings or _settings(), connection=fake_conn, warmup=False))
+def _client(
+    fake_conn: FakeConnection,
+    settings: AgentSettings | None = None,
+    scene_lookup: Any = None,
+) -> TestClient:
+    return TestClient(
+        create_agent_app(
+            settings or _settings(),
+            connection=fake_conn,
+            warmup=False,
+            start_scheduler=False,
+            scene_lookup=scene_lookup,
+        )
+    )
 
 
 def test_chat_replies_and_history_carries_over(
@@ -285,6 +305,7 @@ def test_bearer_auth_enforced_when_token_set(
         assert (
             client.get("/api/metrics", headers={"Authorization": "Bearer wrong"}).status_code == 401
         )
+        assert client.get("/api/schedules").status_code == 401
         assert (
             client.post(
                 "/api/chat",
@@ -320,7 +341,10 @@ def _post_pair(monkeypatch: pytest.MonkeyPatch, queue_timeout: float) -> Any:
 
     monkeypatch.setattr(agent_mod, "chat", recording_slow_chat)
     app = create_agent_app(
-        _settings(queue_timeout=queue_timeout), connection=FakeConnection(), warmup=False
+        _settings(queue_timeout=queue_timeout),
+        connection=FakeConnection(),
+        warmup=False,
+        start_scheduler=False,
     )
 
     async def scenario() -> Any:
@@ -379,7 +403,9 @@ def test_shutdown_stops_own_mcp_subprocess(tmp_path: Path) -> None:
     """own 连接（真实 McpConnection）：退出时收掉 stdio 子进程，不留孤儿。"""
 
     audit_file = tmp_path / "audit.jsonl"
-    app = create_agent_app(_settings(audit_path=str(audit_file)), warmup=False)
+    app = create_agent_app(
+        _settings(audit_path=str(audit_file)), warmup=False, start_scheduler=False
+    )
 
     with TestClient(app):
         pass  # 启动会拉起真实 homelink_mcp 子进程，退出时必须收掉
@@ -387,3 +413,170 @@ def test_shutdown_stops_own_mcp_subprocess(tmp_path: Path) -> None:
     shutdown = [r for r in _audit_events(audit_file) if r["event"] == "shutdown"]
     assert len(shutdown) == 1
     assert shutdown[0]["mcp_connected"] is False  # 子进程已关闭
+
+
+# ---------------------------------------------------------------- 定时任务（P3）
+
+LOW_RISK_SCENE = {"id": "scene-1", "name": "回家", "contains_high_risk": False}
+HIGH_RISK_SCENE = {"id": "scene-2", "name": "睡前", "contains_high_risk": True}
+
+
+class FakeSceneLookup:
+    def __init__(self, scenes: dict[str, dict[str, Any]]) -> None:
+        self.scenes = scenes
+        self.calls: list[str] = []
+
+    async def __call__(self, scene_id: str) -> dict[str, Any] | None:
+        self.calls.append(scene_id)
+        return self.scenes.get(scene_id)
+
+
+class BrokenSceneLookup:
+    async def __call__(self, scene_id: str) -> dict[str, Any] | None:
+        raise RuntimeError("后端不可用")
+
+
+def test_schedule_create_list_delete_and_persist(tmp_path: Path) -> None:
+    db = tmp_path / "agent.db"
+    lookup = FakeSceneLookup({"scene-1": LOW_RISK_SCENE})
+
+    with _client(
+        FakeConnection(), settings=_settings(agent_db_path=str(db)), scene_lookup=lookup
+    ) as client:
+        created = client.post("/api/schedules", json={"scene_id": "scene-1", "cron": "0 7 * * *"})
+        assert created.status_code == 200
+        row = created.json()
+        assert row["scene_id"] == "scene-1"
+        assert row["enabled"] is True
+        assert row["confirm"] is False
+        assert lookup.calls == ["scene-1"]
+
+        listed = client.get("/api/schedules").json()
+        assert listed["count"] == 1
+        assert listed["schedules"][0]["id"] == row["id"]
+
+        assert client.delete(f"/api/schedules/{row['id']}").json() == {"deleted": True}
+        assert client.get("/api/schedules").json() == {"count": 0, "schedules": []}
+        assert client.delete(f"/api/schedules/{row['id']}").json() == {"deleted": False}
+
+    # 另一个 store 实例能读到同一文件：重启后计划仍在
+    reopened = ScheduleStore(str(db))
+    try:
+        assert reopened.list_all() == []
+    finally:
+        reopened.close()
+
+
+def test_schedule_persists_after_restart(tmp_path: Path) -> None:
+    db = tmp_path / "agent.db"
+    lookup = FakeSceneLookup({"scene-1": LOW_RISK_SCENE})
+    with _client(
+        FakeConnection(), settings=_settings(agent_db_path=str(db)), scene_lookup=lookup
+    ) as client:
+        created = client.post("/api/schedules", json={"scene_id": "scene-1", "cron": "0 7 * * *"})
+        assert created.status_code == 200
+        schedule_id = created.json()["id"]
+
+    reopened = ScheduleStore(str(db))
+    try:
+        assert [item.id for item in reopened.list_all()] == [schedule_id]
+    finally:
+        reopened.close()
+
+
+def test_high_risk_scene_requires_confirm_at_creation() -> None:
+    lookup = FakeSceneLookup({"scene-2": HIGH_RISK_SCENE})
+    with _client(FakeConnection(), scene_lookup=lookup) as client:
+        denied = client.post("/api/schedules", json={"scene_id": "scene-2", "cron": "0 22 * * *"})
+        assert denied.status_code == 409
+        assert "confirm" in denied.json()["detail"]
+
+        allowed = client.post(
+            "/api/schedules", json={"scene_id": "scene-2", "cron": "0 22 * * *", "confirm": True}
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["confirm"] is True
+
+
+def test_schedule_rejects_invalid_cron_unknown_scene_and_backend_error() -> None:
+    lookup = FakeSceneLookup({"scene-1": LOW_RISK_SCENE})
+    with _client(FakeConnection(), scene_lookup=lookup) as client:
+        bad_cron = client.post("/api/schedules", json={"scene_id": "scene-1", "cron": "61 * * * *"})
+        assert bad_cron.status_code == 422
+        missing = client.post("/api/schedules", json={"scene_id": "nope", "cron": "0 7 * * *"})
+        assert missing.status_code == 404
+        assert client.get("/api/schedules").json()["count"] == 0
+
+    with _client(FakeConnection(), scene_lookup=BrokenSceneLookup()) as client:
+        broken = client.post("/api/schedules", json={"scene_id": "scene-1", "cron": "0 7 * * *"})
+        assert broken.status_code == 502
+
+
+class FakeSession:
+    """只实现调度用到的 call_tool，记录参数并回放固定 payload。"""
+
+    def __init__(self, payload: str, *, is_error: bool = False) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._payload = payload
+        self._is_error = is_error
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        self.calls.append((name, arguments))
+        return SimpleNamespace(
+            isError=self._is_error,
+            content=[SimpleNamespace(type="text", text=self._payload)],
+        )
+
+
+def _runner_setup(scenes: dict[str, dict[str, Any]], session: FakeSession) -> Any:
+    conn = FakeConnection()
+    conn.session = cast(ClientSession, session)  # 测试桩只实现 call_tool
+    return _schedule_runner(conn, FakeSceneLookup(scenes))
+
+
+def _schedule(scene_id: str = "scene-1", *, confirm: bool = False) -> Schedule:
+    return Schedule(
+        id="s1",
+        scene_id=scene_id,
+        cron="0 7 * * *",
+        enabled=True,
+        confirm=confirm,
+        created_at="2026-11-10T07:00:00",
+    )
+
+
+def test_schedule_runner_runs_scene_with_confirm() -> None:
+    session = FakeSession('{"status": "sent"}')
+    runner = _runner_setup({"scene-1": LOW_RISK_SCENE}, session)
+
+    asyncio.run(runner(_schedule()))
+
+    assert session.calls == [("home_run_scene", {"scene_id": "scene-1", "confirm": True})]
+
+
+def test_schedule_runner_blocks_risk_escalated_scene() -> None:
+    session = FakeSession('{"status": "sent"}')
+    runner = _runner_setup({"scene-2": HIGH_RISK_SCENE}, session)
+
+    with pytest.raises(PermissionError):
+        asyncio.run(runner(_schedule("scene-2")))
+
+    assert session.calls == []  # 未授权：一个红外指令都不该发出
+
+
+def test_schedule_runner_reports_partial_result_as_error() -> None:
+    session = FakeSession('{"status": "partial"}')
+    runner = _runner_setup({"scene-1": LOW_RISK_SCENE}, session)
+
+    with pytest.raises(RuntimeError, match="partial"):
+        asyncio.run(runner(_schedule()))
+
+
+def test_schedule_runner_fails_when_scene_disappeared() -> None:
+    session = FakeSession('{"status": "sent"}')
+    runner = _runner_setup({}, session)
+
+    with pytest.raises(RuntimeError, match="场景不存在"):
+        asyncio.run(runner(_schedule()))
+
+    assert session.calls == []

@@ -18,6 +18,7 @@ DEFAULT_SESSION_TTL_MIN = 120
 DEFAULT_MAX_SESSIONS = 20
 DEFAULT_QUEUE_TIMEOUT = 30.0
 DEFAULT_CONFIRM_TTL = 120.0
+DEFAULT_AGENT_DB_PATH = "data/agent.db"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class AgentSettings:
     daemon_token: str = ""
     queue_timeout: float = DEFAULT_QUEUE_TIMEOUT
     confirm_ttl: float = DEFAULT_CONFIRM_TTL
+    agent_db_path: str = DEFAULT_AGENT_DB_PATH
 
 
 def _positive_int(raw: str, fallback: int) -> int:
@@ -78,4 +80,5 @@ def load_settings() -> AgentSettings:
             os.environ.get("AGENTD_QUEUE_TIMEOUT", ""), DEFAULT_QUEUE_TIMEOUT
         ),
         confirm_ttl=_positive_float(os.environ.get("AGENT_CONFIRM_TTL", ""), DEFAULT_CONFIRM_TTL),
+        agent_db_path=(os.environ.get("AGENTD_DB_PATH") or DEFAULT_AGENT_DB_PATH).strip(),
     )

@@ -567,6 +567,18 @@ jobs:
 - 服务重启后计划仍在
 - 高风险场景未确认不可创建
 
+**已落地（2026-11-10）**：
+
+- `src/homelink_agent/scheduler.py`：`ScheduleStore`（独立 `data/agent.db`，`AGENTD_DB_PATH` 可改）、
+  5 段 cron 解析与匹配（`*` / 数字 / `a-b` / `*/n` / 列表，周字段 0 或 7 = 周日）、
+  `Scheduler` 每 20 秒检查一次、按分钟去重（重启后同一分钟不重复执行）、失败写审计不重试
+- daemon 新增 `POST /api/schedules` / `GET /api/schedules` / `DELETE /api/schedules/{id}`，
+  归入现有 `AGENTD_TOKEN` 鉴权；创建时经后端 `GET /api/agent/scenes` 校验场景存在与风险
+- 到点经 MCP `home_run_scene(confirm=true)` 执行一次；若场景在创建后风险升级且当时未授权，
+  到点跳过并记 `schedule_error`，不发送任何红外指令
+- 测试：`tests/test_scheduler.py`（cron/持久化/去重/失败不重试）、`tests/test_daemon.py`
+  （增删查、高风险确认、非法 cron、场景不存在、后端不可用、runner 行为）
+
 ---
 
 ## 7. P4：可选能力
