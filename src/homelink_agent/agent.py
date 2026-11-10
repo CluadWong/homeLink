@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -32,8 +33,13 @@ def _looks_like_consent(text: str) -> bool:
 
 
 class HomeAgent:
-    def __init__(self, settings: AgentSettings) -> None:
+    def __init__(
+        self,
+        settings: AgentSettings,
+        on_tool: Callable[[str, dict[str, Any], str], None] | None = None,
+    ) -> None:
         self._settings = settings
+        self._on_tool = on_tool
         self._pending_device: str | None = None
         self._user_confirmed = False
 
@@ -105,6 +111,8 @@ class HomeAgent:
             if getattr(block, "type", "") == "text"
         )
         _debug(f"[tool] {name} {json.dumps(arguments, ensure_ascii=False)} -> {text[:200]}")
+        if self._on_tool is not None:
+            self._on_tool(name, arguments, text)
         if result.isError:
             text = "工具执行失败：" + text
             if "CONFIRMATION_REQUIRED" in text:
