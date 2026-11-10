@@ -8,12 +8,25 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
 from homelink_mcp.client import HomeLinkClient
 from homelink_mcp.config import load_settings
+
+# 与 docs/agent-tools.md 第 3 节 device_type 枚举一致；契约同步测试会校验。
+DeviceType = Literal[
+    "air_conditioner",
+    "heater",
+    "fan",
+    "humidifier",
+    "projector",
+    "speaker",
+    "tv",
+    "light",
+    "appliance",
+]
 
 INSTRUCTIONS = (
     "家庭红外设备管家。设备支持什么以 capabilities 为准，不要猜；"
@@ -31,7 +44,7 @@ def _client() -> HomeLinkClient:
 @mcp.tool()
 async def home_find_devices(
     room: str | None = None,
-    device_type: str | None = None,
+    device_type: DeviceType | None = None,
     name: str | None = None,
 ) -> dict[str, Any]:
     """按房间、设备类型或名称（含别名）检索设备。
