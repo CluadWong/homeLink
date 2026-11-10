@@ -22,6 +22,10 @@ dependencies = [
 mcp = [
   "mcp>=1.2,<2",
 ]
+# 可选组件：本地管家 Agent（src/homelink_agent），依赖同款 MCP SDK 与本地 Ollama。
+agent = [
+  "mcp>=1.2,<2",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",
@@ -31,6 +35,7 @@ dev = [
 
 [project.scripts]
 homelink-mcp = "homelink_mcp.server:main"
+homelink-agent = "homelink_agent.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -52,7 +57,7 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "SIM"]
 ignore = ["E501"]  # 行宽交给 black 处理
 
 [tool.ruff.lint.isort]
-known-first-party = ["homelink", "homelink_mcp"]
+known-first-party = ["homelink", "homelink_mcp", "homelink_agent"]
 
 # ---------- black ----------
 [tool.black]
@@ -62,7 +67,7 @@ target-version = ["py311"]
 # ---------- mypy ----------
 [tool.mypy]
 python_version = "3.11"
-files = ["src/homelink", "src/homelink_mcp", "tests"]
+files = ["src/homelink", "src/homelink_mcp", "src/homelink_agent", "tests"]
 explicit_package_bases = true
 mypy_path = "src"
 warn_unused_configs = true

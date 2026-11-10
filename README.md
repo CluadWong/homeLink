@@ -51,6 +51,28 @@ powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 
 必需配置缺失或不可解析时，启动会打印**缺哪个文件、最小可用示例、文档位置**，并以非 0 退出码结束。
 
+## 本地管家 Agent（可选）
+
+`src/homelink_agent` 是一个独立进程：把 6 个能力经 `homelink-mcp` 暴露给本地 Ollama，不 import 服务端代码、不碰数据库。
+
+```powershell
+pip install -e ".[agent]"
+ollama serve                       # 另开终端，确保模型已 pull
+python -m homelink_agent "卧室的风扇现在是什么状态？"
+python -m homelink_agent           # 交互模式
+```
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 地址 |
+| `OLLAMA_MODEL` | `qwen3.5:9b-q4_K_M` | 需支持 tool calling |
+| `HOMELINK_BASE_URL` | `http://127.0.0.1:8000` | 传给 MCP 子进程 |
+| `HOMELINK_API_TOKEN` | 空 | 与服务端 token 一致 |
+| `AGENT_MAX_STEPS` | `6` | 单轮最多几跳工具调用 |
+| `AGENT_DEBUG` | 未设置 | 设为 `1` 打印工具调用明细 |
+
+高风险设备（`risk_level=high`）由运行时兜底：模型不能自己补 `confirm=true`，只有「上一轮被拦下的同一设备 + 本轮用户明确同意」才放行；其他情况一律降级为 `confirm=false`，由服务端返回 409。
+
 ## 文档
 
 全部在 [docs/](docs/README.md)：
