@@ -21,7 +21,7 @@
 7. request_id 由运行时自动注入并覆盖你传入的值：同一轮里同一设备同一命令的重试会自动复用同一幂等键，你不需要也不应该自己编造。
 8. request_id 冲突返回 409 CONFLICT 时，换一轮新指令重发即可获得新幂等键（运行时会自动生成），不要改设备或改功能硬试。
 9. risk_level=high 的设备（门锁、燃气、烤箱、取暖器等）：先把「设备 + 动作」复述给用户并得到明确同意，再用 confirm=true 调用；未确认时接口返回 409 CONFIRMATION_REQUIRED。
-10. 执行包含高风险设备的场景前，先提示用户，再调用 home_run_scene。
+10. 执行包含高风险设备的场景前，先把场景内容复述给用户并征得明确同意；包含高风险设备的场景未确认时返回 409 CONFIRMATION_REQUIRED，得到同意后带 confirm=true 重试。
 
 【场景与自动化】
 11. 场景是预先建好的一组功能顺序执行，只能用 home_run_scene 按 scene_id 运行；结果 status 为 sent / partial / failed，按 results 逐条汇报失败项。
@@ -50,7 +50,7 @@
 | `home_get_device_state` | GET | `/api/agent/devices/{device_id}/state` | 单设备虚拟状态 |
 | `home_get_home_snapshot` | GET | `/api/agent/snapshot` | 网关状态 + 设备列表 + 场景列表，一次拿全 |
 | `home_control_device` | POST | `/api/agent/control` | 回放一条已学码功能；`request_id` 幂等 |
-| `home_run_scene` | POST | `/api/agent/scenes/{scene_id}/run` | 顺序执行场景内功能 |
+| `home_run_scene` | POST | `/api/agent/scenes/{scene_id}/run` | 顺序执行场景内功能；包含高风险设备的场景须 `confirm=true` |
 | `home_create_automation` | POST | `/api/agent/automations` | 固定 `501 NOT_SUPPORTED`，保留给未来 |
 
 管理端专用、**不**给模型的能力：单设备详情 `GET /api/agent/devices/{id}`、元数据写入 `PUT .../metadata`、场景增删查（`GET/POST/DELETE /api/agent/scenes`）、命令结果查询 `GET /api/agent/commands/{request_id}`。这些由人、脚本或运维流程调用。
@@ -176,13 +176,18 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
     "type": "function",
     "function": {
       "name": "home_run_scene",
-      "description": "按顺序执行一个已存在的场景。场景 ID 来自快照的 scenes 列表。返回逐项结果与整体状态（sent / partial / failed）。",
+      "description": "按顺序执行一个已存在的场景。场景 ID 来自快照的 scenes 列表。返回逐项结果与整体状态（sent / partial / failed）。包含高风险设备（contains_high_risk=true）的场景必须由用户明确同意后传 confirm=true。",
       "parameters": {
         "type": "object",
         "properties": {
           "scene_id": {
             "type": "string",
             "description": "场景 ID，例如 sc_1a2b3c4d5e6f"
+          },
+          "confirm": {
+            "type": "boolean",
+            "default": false,
+            "description": "场景 contains_high_risk 为 true 时必须由用户明确同意后传 true，否则返回 CONFIRMATION_REQUIRED"
           }
         },
         "required": ["scene_id"],
@@ -277,6 +282,8 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
 
 ### 4.4 场景执行（run_scene）
 
+场景列表（快照 `scenes`）中的每个场景附带风险聚合：`risk_level`（`low` / `high`）与 `contains_high_risk`；包含高风险设备的场景未带 `confirm=true` 会返回 409 `CONFIRMATION_REQUIRED`，不会执行任何一项。
+
 ```json
 {
   "scene_id": "sc_1a2b3c4d5e6f",
@@ -307,7 +314,7 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
 | `UNAUTHORIZED` | 401 | 请求 token 不匹配 | 不要重试，告知配置问题 |
 | `NOT_FOUND` | 404 | 设备 / 功能 / 场景 / 请求不存在，或功能还没学码 | 重新查设备与能力，向用户说明可选动作 |
 | `CONFLICT` | 409 | `request_id` 被占用或场景重名 | 换新的 `request_id` 重发 |
-| `CONFIRMATION_REQUIRED` | 409 | 高风险设备未确认 | 复述操作并征得同意后带 `confirm=true` 重试 |
+| `CONFIRMATION_REQUIRED` | 409 | 高风险设备或包含高风险设备的场景未确认 | 复述操作并征得同意后带 `confirm=true` 重试 |
 | `DEVICE_OFFLINE` | 503 | 网关不可达 | 提示检查电源与网络；最多重试 1 次 |
 | `DEVICE_UNAUTHORIZED` | 401 | 网关鉴权失败 | 告知需要修正网关凭据，不要重试 |
 | `GATEWAY_TIMEOUT` | 504 | 发送超时，信号可能已发出 | 不要自动重发，提示用户现场确认 |

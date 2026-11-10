@@ -79,3 +79,7 @@ def test_registers_six_tools() -> None:
     assert names == EXPECTED_TOOLS
     control = next(tool for tool in tools if tool.name == "home_control_device")
     assert set(control.inputSchema["required"]) == {"device_id", "command", "request_id"}
+    scene = next(tool for tool in tools if tool.name == "home_run_scene")
+    assert set(scene.inputSchema["required"]) == {"scene_id"}
+    assert scene.inputSchema["properties"]["confirm"]["type"] == "boolean"
+    assert scene.inputSchema["properties"]["confirm"]["default"] is False

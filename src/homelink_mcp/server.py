@@ -109,18 +109,20 @@ async def home_control_device(
 
 
 @mcp.tool()
-async def home_run_scene(scene_id: str) -> dict[str, Any]:
+async def home_run_scene(scene_id: str, confirm: bool = False) -> dict[str, Any]:
     """按顺序执行一个已存在的场景。
 
     Args:
         scene_id: 场景 ID，来自 home_get_home_snapshot 返回的 scenes 列表。
+        confirm: 场景 contains_high_risk 为 true 时须由用户明确同意后传 true，
+            否则报 CONFIRMATION_REQUIRED。
 
     Returns:
         {"scene_id": str, "status": "sent" | "partial" | "failed",
         "results": [{"device_id", "command", "status", "request_id" | "error_code", "message"}]}。
         整体失败不抛错，按 results 逐条向用户汇报失败项。
     """
-    return await _client().run_scene(scene_id)
+    return await _client().run_scene(scene_id, confirm=confirm)
 
 
 @mcp.tool()

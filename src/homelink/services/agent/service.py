@@ -229,10 +229,17 @@ class AgentService:
             resolved.append({"device_id": device["id"], "function_id": function["id"]})
         return self._scenes.create(name.strip(), resolved)
 
-    def run_scene(self, scene_id: str, *, actor: str, trace_id: str) -> dict[str, Any]:
+    def run_scene(
+        self, scene_id: str, *, confirm: bool, actor: str, trace_id: str
+    ) -> dict[str, Any]:
         scene = self._scenes.get(scene_id)
         if not scene["items"]:
             raise AppError(ErrorCode.INVALID_REQUEST, "场景没有任何可执行功能")
+        if scene["contains_high_risk"] and not confirm:
+            raise AppError(
+                ErrorCode.CONFIRMATION_REQUIRED,
+                f"场景「{scene['name']}」包含高风险设备，请先向用户复述并确认，再带 confirm=true 重试",
+            )
         results: list[dict[str, Any]] = []
         for index, item in enumerate(scene["items"]):
             request_id = f"scene-{scene_id}-{index}-{secrets.token_hex(4)}"

@@ -75,7 +75,7 @@ def build_context(
         devices,
         states,
         control,
-        SceneStore(db),
+        SceneStore(db, devices),
         CommandRequestStore(db),
         probe,
     )

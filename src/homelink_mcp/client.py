@@ -108,8 +108,12 @@ class HomeLinkClient:
         }
         return await self._request("POST", "/control", body=body)
 
-    async def run_scene(self, scene_id: str) -> dict[str, Any]:
-        return await self._request("POST", f"/scenes/{quote(scene_id, safe='')}/run")
+    async def run_scene(self, scene_id: str, *, confirm: bool) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/scenes/{quote(scene_id, safe='')}/run",
+            body={"confirm": confirm},
+        )
 
     async def create_automation(self, rule: dict[str, Any] | None = None) -> dict[str, Any]:
         return await self._request("POST", "/automations", body={"rule": rule or {}})

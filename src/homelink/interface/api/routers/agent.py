@@ -9,6 +9,7 @@ from homelink.interface.api.schemas import (
     AgentControlRequest,
     AgentMetadataRequest,
     AgentSceneCreateRequest,
+    AgentSceneRunRequest,
 )
 from homelink.interface.api.security import require_token
 
@@ -110,10 +111,13 @@ def delete_scene(request: Request, scene_id: str) -> dict:
 
 
 @router.post("/scenes/{scene_id}/run")
-def run_scene(request: Request, scene_id: str) -> dict:
+def run_scene(request: Request, scene_id: str, payload: AgentSceneRunRequest | None = None) -> dict:
     context = request.app.state.context
     result = context.agent.run_scene(
-        scene_id, actor=_actor(request), trace_id=request.state.trace_id
+        scene_id,
+        confirm=payload.confirm if payload is not None else False,
+        actor=_actor(request),
+        trace_id=request.state.trace_id,
     )
     return _envelope(request, result)
 

@@ -156,7 +156,7 @@
 | 场景列表 | `GET /api/agent/scenes` |
 | 创建场景 | `POST /api/agent/scenes` |
 | 删除场景 | `DELETE /api/agent/scenes/{scene_id}` |
-| 跑场景 | `POST /api/agent/scenes/{scene_id}/run` |
+| 跑场景 | `POST /api/agent/scenes/{scene_id}/run`（可选 body `{confirm}`） |
 | 设备元数据 | `PUT /api/agent/devices/{device_id}/metadata` |
 | 自动化（未支持） | `POST /api/agent/automations` → 501 |
 
@@ -170,7 +170,8 @@
 - 高风险设备未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`；Agent 必须先复述并取得用户确认。
 - 网关不可达 → 503 `DEVICE_OFFLINE` 且命令记为 `failed`；超时 → 504；网关响应异常 → 502。
 - **重试策略：调用方不得自动重发。** `GATEWAY_TIMEOUT` 时信号可能已发出，自动重试会造成重复动作（风扇开关类为翻转语义）；`EXECUTION_FAILED / DEVICE_OFFLINE` 已明确未执行，可在用户重新确认后用**新的 `request_id`** 重发。重放旧 `request_id` 只会拿回原结果，不会再次发送。
-- 场景：`items` 1–20 条，创建时即解析功能；运行逐条发送并返回 `results`，整体 `status` 为 `sent / partial / failed`。场景不引入触发条件与调度。
+- 场景：`items` 1–20 条，创建时即解析功能；运行逐条发送并返回 `results`，整体 `status` 为 `sent / partial / failed`。场景 payload 附带风险聚合 `risk_level`（`low` / `high`）与 `contains_high_risk`（按场景内设备的 `risk_level` 聚合）。场景不引入触发条件与调度。
+- 跑场景接受可选 body `{confirm: false}`：无 body 按 `confirm=false` 处理，未声明字段 400 `INVALID_REQUEST`。`contains_high_risk=true` 的场景未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`，且不产生任何 `command_requests` 记录；确认后逐项发送，每条场景项只产生一条记录。
 - 自动化规则本期不实现，固定 501 `NOT_SUPPORTED`。
 
 ## 3. 学码契约

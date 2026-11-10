@@ -82,6 +82,38 @@ def test_guard_requires_consent(agent: HomeAgent) -> None:
     assert agent._guard_confirm(arguments, pending="lock-1")["confirm"] is False
 
 
+def test_guard_blocks_scene_self_confirmation(agent: HomeAgent) -> None:
+    arguments = {"scene_id": "sc_1", "confirm": True}
+
+    blocked = agent._guard_scene_confirm(arguments, pending=None)
+
+    assert blocked["confirm"] is False
+    assert arguments["confirm"] is True  # 不修改入参
+
+
+def test_guard_scene_allows_pending_scene_with_consent(agent: HomeAgent) -> None:
+    agent._user_confirmed = True
+    arguments = {"scene_id": "sc_1", "confirm": True}
+
+    assert agent._guard_scene_confirm(arguments, pending="sc_1")["confirm"] is True
+    assert agent._guard_scene_confirm(arguments, pending="sc_2")["confirm"] is False
+
+
+def test_scene_and_device_pending_do_not_share(agent: HomeAgent) -> None:
+    """同 ID 也互不串用：场景待确认不解锁设备，设备待确认不解锁场景。"""
+
+    agent._user_confirmed = True
+    agent._pending_scene = "same_id"
+
+    device_call = {"device_id": "same_id", "command": "开", "confirm": True}
+    assert agent._guard_confirm(device_call, pending=None)["confirm"] is False
+
+    agent._pending_device = "same_id"
+    agent._pending_scene = None
+    scene_call = {"scene_id": "same_id", "confirm": True}
+    assert agent._guard_scene_confirm(scene_call, pending=None)["confirm"] is False
+
+
 class _RecordingSession:
     """记录 call_tool 入参的假 MCP 会话。"""
 
@@ -162,6 +194,55 @@ def test_call_tool_reuses_request_id_for_retry_within_turn(agent: HomeAgent) -> 
     assert session.calls[0][1]["request_id"] != _turn_request_id(
         "ffffffff", "dev_1", "开"
     )  # 换了 turn_id 就不同
+
+
+class _FailingSession(_RecordingSession):
+    """返回指定错误文本的假 MCP 会话。"""
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+        self.calls.append((name, arguments))
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=self.text)], isError=True)
+
+
+def test_call_tool_scene_blocks_self_confirm_and_sets_pending(agent: HomeAgent) -> None:
+    session = _FailingSession("工具执行失败：CONFIRMATION_REQUIRED 场景包含高风险设备")
+    call = {
+        "function": {
+            "name": "home_run_scene",
+            "arguments": {"scene_id": "sc_1", "confirm": True},
+        }
+    }
+
+    asyncio.run(
+        agent._call_tool(
+            cast(ClientSession, session), call, previous_pending=None, turn_id="abcd1234"
+        )
+    )
+
+    assert session.calls[0][1]["confirm"] is False  # 模型不能自己补 confirm
+    assert agent._pending_scene == "sc_1"
+    assert agent._pending_device is None  # 与设备待确认互不串用
+
+
+def test_call_tool_scene_success_clears_pending(agent: HomeAgent) -> None:
+    agent._pending_scene = "sc_1"
+    session = _RecordingSession()
+    call = {
+        "function": {"name": "home_run_scene", "arguments": {"scene_id": "sc_1"}},
+    }
+
+    asyncio.run(
+        agent._call_tool(
+            cast(ClientSession, session), call, previous_pending=None, turn_id="abcd1234"
+        )
+    )
+
+    assert session.calls[0][1] == {"scene_id": "sc_1"}
+    assert agent._pending_scene is None
 
 
 def test_to_ollama_tool_flattens_nullable_fields() -> None:
@@ -258,3 +339,18 @@ def test_confirmed_pending_device_keeps_confirm(tmp_path: Path) -> None:
 
     assert allowed["confirm"] is True
     assert not (tmp_path / "audit.jsonl").exists()
+
+
+def test_scene_confirm_downgrade_is_audited(tmp_path: Path) -> None:
+    settings = replace(load_settings(), audit_path=str(tmp_path / "audit.jsonl"))
+    agent = HomeAgent(settings)
+    agent._pending_scene = "sc_1"
+
+    guarded = agent._guard_scene_confirm({"scene_id": "sc_2", "confirm": True}, None)
+
+    assert guarded["confirm"] is False
+    record = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert record["event"] == "confirm_downgraded"
+    assert record["scene_id"] == "sc_2"
+    assert record["pending"] == "sc_1"
+    assert record["reason"] == "场景不在待确认清单"

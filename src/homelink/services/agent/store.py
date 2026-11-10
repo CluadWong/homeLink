@@ -10,6 +10,8 @@ from typing import Any
 from homelink.core.database import Database
 from homelink.core.errors import AppError, ErrorCode
 from homelink.core.timeutil import utc_now_iso
+from homelink.services.agent.catalog import build_device_model
+from homelink.services.device_management.devices import DeviceStore
 
 
 def _new_id(prefix: str) -> str:
@@ -82,10 +84,15 @@ class CommandRequestStore:
 
 
 class SceneStore:
-    """场景 = 一组按顺序执行的功能；不引入触发条件与调度。"""
+    """场景 = 一组按顺序执行的功能；不引入触发条件与调度。
 
-    def __init__(self, db: Database) -> None:
+    场景 payload 附带风险聚合（`risk_level` / `contains_high_risk`），
+    供执行层在不重查设备的情况下做高风险确认闸门。
+    """
+
+    def __init__(self, db: Database, devices: DeviceStore) -> None:
         self._db = db
+        self._devices = devices
 
     def list_all(self) -> list[dict[str, Any]]:
         with self._db.reader() as conn:
@@ -138,8 +145,7 @@ class SceneStore:
             conn.execute("DELETE FROM scenes WHERE id = ?", (scene_id,))
         return scene
 
-    @staticmethod
-    def _with_items(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    def _with_items(self, conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         items = conn.execute(
             """
             SELECT i.device_id, i.function_id, i.position, f.name AS command
@@ -150,7 +156,7 @@ class SceneStore:
             """,
             (row["id"],),
         ).fetchall()
-        return {
+        scene: dict[str, Any] = {
             "scene_id": row["id"],
             "name": row["name"],
             "created_at": row["created_at"],
@@ -163,3 +169,14 @@ class SceneStore:
                 for item in items
             ],
         }
+        # 设备删除时 scene_items 由外键级联清理，这里的 get 不会触发 NOT_FOUND。
+        contains_high_risk = any(
+            build_device_model(self._devices.get(item["device_id"]), None, online=True)[
+                "risk_level"
+            ]
+            == "high"
+            for item in scene["items"]
+        )
+        scene["contains_high_risk"] = contains_high_risk
+        scene["risk_level"] = "high" if contains_high_risk else "low"
+        return scene

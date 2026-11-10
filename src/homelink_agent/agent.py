@@ -63,6 +63,7 @@ class HomeAgent:
         self._on_tool = on_tool
         self._audit = AuditLog(settings.audit_path)
         self._pending_device: str | None = None
+        self._pending_scene: str | None = None
         self._user_confirmed = False
 
     async def run(self, user_text: str, history: list[dict[str, str]] | None = None) -> str:
@@ -97,13 +98,19 @@ class HomeAgent:
     ) -> str:
         """完整一轮对话：常驻服务与一次性路径共用；session 由调用方提供并保活。"""
 
-        # 上一轮被拦下的设备只对这一轮有效，避免「下次随口说好」被当成授权。
+        # 上一轮被拦下的设备/场景只对这一轮有效，避免「下次随口说好」被当成授权。
         previous_pending = self._pending_device
+        previous_pending_scene = self._pending_scene
         self._pending_device = None
+        self._pending_scene = None
         self._user_confirmed = _looks_like_consent(user_text)
         turn_id = uuid.uuid4().hex[:8]  # 本轮幂等键前缀，见 _turn_request_id
         self._audit.write(
-            "turn_start", user=user_text, consent=self._user_confirmed, pending=previous_pending
+            "turn_start",
+            user=user_text,
+            consent=self._user_confirmed,
+            pending=previous_pending,
+            pending_scene=previous_pending_scene,
         )
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -127,7 +134,15 @@ class HomeAgent:
                     }
                 )
                 for call in calls:
-                    messages.append(await self._call_tool(session, call, previous_pending, turn_id))
+                    messages.append(
+                        await self._call_tool(
+                            session,
+                            call,
+                            previous_pending,
+                            turn_id,
+                            previous_pending_scene=previous_pending_scene,
+                        )
+                    )
         except BaseExceptionGroup as group:
             # anyio 任务组会把模型/网络异常包成 ExceptionGroup，剥出来再抛
             error = _unwrap(group)
@@ -144,6 +159,7 @@ class HomeAgent:
         call: dict[str, Any],
         previous_pending: str | None,
         turn_id: str,
+        previous_pending_scene: str | None = None,
     ) -> dict[str, Any]:
         function = call.get("function") or {}
         name = str(function.get("name") or "")
@@ -162,6 +178,9 @@ class HomeAgent:
             arguments["request_id"] = _turn_request_id(
                 turn_id, str(arguments.get("device_id") or ""), str(arguments.get("command") or "")
             )
+        elif name == "home_run_scene":
+            # 场景确认与设备确认互不串用：待确认键为 scene:<scene_id> 语义（单独存 _pending_scene）。
+            arguments = self._guard_scene_confirm(arguments, previous_pending_scene)
 
         result = await session.call_tool(name, arguments)
         text = "\n".join(
@@ -182,7 +201,12 @@ class HomeAgent:
         if result.isError:
             text = "工具执行失败：" + text
             if "CONFIRMATION_REQUIRED" in text:
-                self._pending_device = str(arguments.get("device_id") or "") or None
+                if name == "home_run_scene":
+                    self._pending_scene = str(arguments.get("scene_id") or "") or None
+                else:
+                    self._pending_device = str(arguments.get("device_id") or "") or None
+        elif name == "home_run_scene":
+            self._pending_scene = None
         else:
             self._pending_device = None
         return {"role": "tool", "tool_name": name, "content": text or "（无输出）"}
@@ -197,12 +221,40 @@ class HomeAgent:
         pending = pending or self._pending_device
         if self._user_confirmed and pending and device_id == pending:
             return arguments
+        return self._downgrade_confirm(
+            arguments, target=device_id, pending=pending, key="device_id", label="设备"
+        )
+
+    def _guard_scene_confirm(
+        self, arguments: dict[str, Any], pending: str | None
+    ) -> dict[str, Any]:
+        """场景与设备各自维护待确认状态，互不串用。"""
+
+        if not arguments.get("confirm"):
+            return arguments
+        scene_id = str(arguments.get("scene_id") or "")
+        pending = pending or self._pending_scene
+        if self._user_confirmed and pending and scene_id == pending:
+            return arguments
+        return self._downgrade_confirm(
+            arguments, target=scene_id, pending=pending, key="scene_id", label="场景"
+        )
+
+    def _downgrade_confirm(
+        self,
+        arguments: dict[str, Any],
+        *,
+        target: str,
+        pending: str | None,
+        key: str,
+        label: str,
+    ) -> dict[str, Any]:
         blocked = dict(arguments)
         blocked["confirm"] = False
-        reason = "设备不在待确认清单" if pending and device_id != pending else "本轮无明确用户同意"
+        reason = f"{label}不在待确认清单" if pending and target != pending else "本轮无明确用户同意"
         self._audit.write(
             "confirm_downgraded",
-            device_id=device_id,
+            **{key: target},
             pending=pending,
             reason=reason,
             user_confirmed=self._user_confirmed,

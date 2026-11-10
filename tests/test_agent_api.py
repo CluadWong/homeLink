@@ -230,9 +230,12 @@ def test_scene_create_run_and_delete(client, context):
         functions["开机"],
         functions["关机"],
     ]
+    assert created["risk_level"] == "low"
+    assert created["contains_high_risk"] is False
 
     listed = client.get("/api/agent/scenes").json()["result"]
     assert listed["count"] == 1
+    assert listed["scenes"][0]["contains_high_risk"] is False
 
     run = client.post(f"/api/agent/scenes/{scene_id}/run")
     assert run.status_code == 200
@@ -242,6 +245,56 @@ def test_scene_create_run_and_delete(client, context):
 
     assert client.delete(f"/api/agent/scenes/{scene_id}").status_code == 200
     assert client.post(f"/api/agent/scenes/{scene_id}/run").status_code == 404
+
+
+def _command_count(context) -> int:
+    with context.db.reader() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM command_requests").fetchone()[0])
+
+
+def _make_high_risk_scene(client, context) -> str:
+    device_id, _ = _make_device(context, client, name="取暖器", functions=("开机", "关机"))
+    return client.post(
+        "/api/agent/scenes",
+        json={"name": "取暖", "items": [{"device_id": device_id, "command": "开机"}]},
+    ).json()["result"]["scene_id"]
+
+
+def test_scene_payload_aggregates_high_risk(client, context):
+    scene_id = _make_high_risk_scene(client, context)
+
+    scene = client.get("/api/agent/scenes").json()["result"]["scenes"][0]
+    assert scene["scene_id"] == scene_id
+    assert scene["risk_level"] == "high"
+    assert scene["contains_high_risk"] is True
+
+
+def test_high_risk_scene_requires_confirmation(client, context):
+    scene_id = _make_high_risk_scene(client, context)
+
+    denied = client.post(f"/api/agent/scenes/{scene_id}/run")
+    assert denied.status_code == 409
+    assert denied.json()["error"] == "CONFIRMATION_REQUIRED"
+    assert _command_count(context) == 0  # 未确认时不产生任何发送记录
+
+    confirmed = client.post(f"/api/agent/scenes/{scene_id}/run", json={"confirm": True})
+    assert confirmed.status_code == 200
+    assert confirmed.json()["result"]["status"] == "sent"
+    assert _command_count(context) == 1  # 每条场景项只执行一次
+
+    # 无 body 等价于 confirm=false，再次被拦
+    again = client.post(f"/api/agent/scenes/{scene_id}/run")
+    assert again.status_code == 409
+    assert _command_count(context) == 1
+
+
+def test_scene_run_rejects_undeclared_fields(client, context):
+    scene_id = _make_high_risk_scene(client, context)
+
+    response = client.post(f"/api/agent/scenes/{scene_id}/run", json={"force": True})
+    assert response.status_code == 400
+    assert response.json()["error"] == "INVALID_REQUEST"
+    assert _command_count(context) == 0
 
 
 def test_automations_are_explicitly_not_supported(client):

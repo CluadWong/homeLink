@@ -196,6 +196,12 @@ class AgentSceneCreateRequest(_StrictBody):
         return text
 
 
+class AgentSceneRunRequest(_StrictBody):
+    """跑场景的可选请求体；包含高风险设备的场景必须 confirm=true。"""
+
+    confirm: bool = False
+
+
 class AgentMetadataRequest(_StrictBody):
     type: str | None = Field(default=None, max_length=32)
     aliases: list[str] | None = Field(default=None, max_length=20)
