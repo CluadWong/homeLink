@@ -17,7 +17,13 @@ from mcp import ClientSession
 
 
 def _settings(**overrides: Any) -> AgentSettings:
-    return replace(load_settings(), audit_path="off", **overrides)
+    # daemon_token 默认清空，避免宿主机环境变量影响测试；鉴权用例显式传入
+    return replace(
+        load_settings(),
+        audit_path="off",
+        daemon_token=overrides.pop("daemon_token", ""),
+        **overrides,
+    )
 
 
 class FakeConnection(McpConnection):
@@ -58,8 +64,8 @@ def fake_chat(monkeypatch: pytest.MonkeyPatch) -> list[list[dict[str, Any]]]:
     return seen
 
 
-def _client(fake_conn: FakeConnection) -> TestClient:
-    return TestClient(create_agent_app(_settings(), connection=fake_conn, warmup=False))
+def _client(fake_conn: FakeConnection, settings: AgentSettings | None = None) -> TestClient:
+    return TestClient(create_agent_app(settings or _settings(), connection=fake_conn, warmup=False))
 
 
 def test_chat_replies_and_history_carries_over(
@@ -259,3 +265,34 @@ def test_metrics_percentile_and_sample_cap() -> None:
     assert metrics.errors_total == 0
 
     assert Metrics().percentile(50) is None  # 无样本返回 None
+
+
+# ---------------------------------------------------------------- Bearer 鉴权
+
+
+def test_bearer_auth_enforced_when_token_set(
+    fake_chat: list[list[dict[str, Any]]],
+) -> None:
+    settings = _settings(daemon_token="s3cret")
+
+    with _client(FakeConnection(), settings=settings) as client:
+        assert client.get("/api/health").status_code == 200  # health 永远免鉴权
+        assert client.post("/api/chat", json={"message": "hi"}).status_code == 401
+        assert (
+            client.get("/api/metrics", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        )
+        assert (
+            client.post(
+                "/api/chat",
+                json={"message": "hi"},
+                headers={"Authorization": "Bearer s3cret"},
+            ).status_code
+            == 200
+        )
+
+
+def test_bearer_auth_off_when_token_empty(
+    fake_chat: list[list[dict[str, Any]]],
+) -> None:
+    with _client(FakeConnection(), settings=_settings()) as client:
+        assert client.post("/api/chat", json={"message": "hi"}).status_code == 200

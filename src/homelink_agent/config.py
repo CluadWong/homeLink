@@ -32,6 +32,7 @@ class AgentSettings:
     daemon_port: int
     session_ttl_min: int
     max_sessions: int
+    daemon_token: str = ""
 
 
 def _positive_int(raw: str, fallback: int) -> int:
@@ -68,4 +69,5 @@ def load_settings() -> AgentSettings:
             os.environ.get("AGENTD_SESSION_TTL", ""), DEFAULT_SESSION_TTL_MIN
         ),
         max_sessions=_positive_int(os.environ.get("AGENTD_MAX_SESSIONS", ""), DEFAULT_MAX_SESSIONS),
+        daemon_token=(os.environ.get("AGENTD_TOKEN") or "").strip(),
     )

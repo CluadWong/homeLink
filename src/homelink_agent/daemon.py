@@ -30,9 +30,11 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from mcp.client.stdio import stdio_client
 from pydantic import BaseModel, Field
+from starlette.middleware.base import RequestResponseEndpoint
 
 from homelink_agent.agent import HomeAgent
 from homelink_agent.config import AgentSettings, load_settings
@@ -228,6 +230,18 @@ def create_agent_app(
     metrics = Metrics()
     store = SessionStore(settings, on_tool=metrics.on_tool)
     lock = asyncio.Lock()  # 9B 模型一次只能跑一个请求，串行化避免显存争抢
+
+    @app.middleware("http")
+    async def bearer_auth(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """AGENTD_TOKEN 非空时，除 /api/health 外全部要求 Bearer；空 = 不校验（本机开发）。"""
+        if settings.daemon_token and request.url.path != "/api/health":
+            header = request.headers.get("Authorization", "")
+            if header != f"Bearer {settings.daemon_token}":
+                return JSONResponse(
+                    {"detail": "未授权：需要 Authorization: Bearer <AGENTD_TOKEN>"},
+                    status_code=401,
+                )
+        return await call_next(request)
 
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
