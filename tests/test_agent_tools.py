@@ -8,9 +8,9 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from homelink_agent.agent import HomeAgent, _looks_like_consent
+from homelink_agent.agent import HomeAgent, _looks_like_consent, _unwrap
 from homelink_agent.config import load_settings
-from homelink_agent.llm import to_ollama_tool
+from homelink_agent.llm import OllamaError, to_ollama_tool
 
 
 @pytest.fixture
@@ -91,3 +91,18 @@ def test_to_ollama_tool_flattens_nullable_fields() -> None:
     assert "title" not in function["parameters"]
     assert function["parameters"]["properties"]["confirm"] == {"type": "boolean"}
     assert function["parameters"]["properties"]["room"] == {"type": "string"}
+
+
+def test_unwrap_digs_ollama_error_out_of_nested_group() -> None:
+    inner = ExceptionGroup("llm", [OllamaError("Ollama 返回 HTTP 500")])
+    outer = ExceptionGroup("stdio", [ValueError("先出现的无关错误"), inner])
+
+    unwrapped = _unwrap(outer)
+
+    assert isinstance(unwrapped, OllamaError)
+
+
+def test_unwrap_falls_back_to_first_leaf() -> None:
+    group = ExceptionGroup("stdio", [ValueError("a"), RuntimeError("b")])
+
+    assert isinstance(_unwrap(group), ValueError)
