@@ -1,0 +1,19 @@
+# CI 门禁（roadmap-next.md P1-1）：四项门禁与本地一致，任一失败则 job 失败。
+# 测试全部基于 mock 网关，不依赖本机 Ollama / 真实红外板子。
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[mcp,agent,dev]"
+      - run: python -m ruff check .
+      - run: python -m black --check .
+      - run: python -m mypy
+      - run: python -m pytest -q
