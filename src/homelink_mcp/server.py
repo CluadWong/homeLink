@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from homelink_mcp.client import HomeLinkClient
 from homelink_mcp.config import load_settings
@@ -34,15 +36,28 @@ INSTRUCTIONS = (
     "state 是虚拟状态，控制成功后仍是 unknown，不要声称已确认。"
 )
 
-mcp = FastMCP("homelink", instructions=INSTRUCTIONS)
+
+@asynccontextmanager
+async def _lifespan(_server: FastMCP[HomeLinkClient]) -> AsyncIterator[HomeLinkClient]:
+    """服务生命周期内复用一个 HTTP 客户端，退出时关闭连接池。"""
+    http_client = HomeLinkClient(load_settings())
+    try:
+        yield http_client
+    finally:
+        await http_client.aclose()
 
 
-def _client() -> HomeLinkClient:
-    return HomeLinkClient(load_settings())
+def _http(ctx: Context[Any, HomeLinkClient, Any]) -> HomeLinkClient:
+    """从请求上下文取 lifespan 创建的长生命周期客户端。"""
+    return ctx.request_context.lifespan_context
+
+
+mcp = FastMCP("homelink", instructions=INSTRUCTIONS, lifespan=_lifespan)
 
 
 @mcp.tool()
 async def home_find_devices(
+    ctx: Context[Any, HomeLinkClient, Any],
     room: str | None = None,
     device_type: DeviceType | None = None,
     name: str | None = None,
@@ -58,11 +73,13 @@ async def home_find_devices(
         {"count": int, "devices": [...]}。设备模型含 type、room、aliases、risk_level、
         online、capabilities 与虚拟状态；控制前先用它拿 device_id 与可用 command。
     """
-    return await _client().find_devices(room=room, device_type=device_type, name=name)
+    return await _http(ctx).find_devices(room=room, device_type=device_type, name=name)
 
 
 @mcp.tool()
-async def home_get_device_state(device_id: str) -> dict[str, Any]:
+async def home_get_device_state(
+    ctx: Context[Any, HomeLinkClient, Any], device_id: str
+) -> dict[str, Any]:
     """查询单台设备的虚拟状态。
 
     Args:
@@ -73,11 +90,13 @@ async def home_get_device_state(device_id: str) -> dict[str, Any]:
         "state_updated_at": str | None, "state_readback": false}。
         红外无回传：正常为 unknown，只有用户手动校正过才是 confirmed。
     """
-    return await _client().get_device_state(device_id)
+    return await _http(ctx).get_device_state(device_id)
 
 
 @mcp.tool()
-async def home_get_home_snapshot(room: str | None = None) -> dict[str, Any]:
+async def home_get_home_snapshot(
+    ctx: Context[Any, HomeLinkClient, Any], room: str | None = None
+) -> dict[str, Any]:
     """获取全屋快照：网关状态、设备列表与场景列表。
 
     Args:
@@ -87,11 +106,12 @@ async def home_get_home_snapshot(room: str | None = None) -> dict[str, Any]:
         {"gateway": {...}, "devices": [...], "scenes": [...], "generated_at": str}。
         适合回答「家里现在什么情况」，也用来发现可运行的 scene_id。
     """
-    return await _client().snapshot(room=room)
+    return await _http(ctx).snapshot(room=room)
 
 
 @mcp.tool()
 async def home_control_device(
+    ctx: Context[Any, HomeLinkClient, Any],
     device_id: str,
     command: str,
     request_id: str,
@@ -112,7 +132,7 @@ async def home_control_device(
         "function_id": str, "command": str, "state": "unknown", "message": str, "trace_id": str}。
         status 只有 sent（信号已发出）；失败以错误形式返回，不会返回 failed。
     """
-    return await _client().control_device(
+    return await _http(ctx).control_device(
         device_id=device_id,
         command=command,
         request_id=request_id,
@@ -122,7 +142,9 @@ async def home_control_device(
 
 
 @mcp.tool()
-async def home_run_scene(scene_id: str, confirm: bool = False) -> dict[str, Any]:
+async def home_run_scene(
+    ctx: Context[Any, HomeLinkClient, Any], scene_id: str, confirm: bool = False
+) -> dict[str, Any]:
     """按顺序执行一个已存在的场景。
 
     Args:
@@ -135,11 +157,13 @@ async def home_run_scene(scene_id: str, confirm: bool = False) -> dict[str, Any]
         "results": [{"device_id", "command", "status", "request_id" | "error_code", "message"}]}。
         整体失败不抛错，按 results 逐条向用户汇报失败项。
     """
-    return await _client().run_scene(scene_id, confirm=confirm)
+    return await _http(ctx).run_scene(scene_id, confirm=confirm)
 
 
 @mcp.tool()
-async def home_create_automation(rule: dict[str, Any] | None = None) -> dict[str, Any]:
+async def home_create_automation(
+    ctx: Context[Any, HomeLinkClient, Any], rule: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """创建自动化规则（当前不支持，固定返回 NOT_SUPPORTED）。
 
     Args:
@@ -148,7 +172,7 @@ async def home_create_automation(rule: dict[str, Any] | None = None) -> dict[str
     Returns:
         失败：not supported。需要定时能力时应告知用户改用手动触发场景或外部调度。
     """
-    return await _client().create_automation(rule)
+    return await _http(ctx).create_automation(rule)
 
 
 def main() -> None:

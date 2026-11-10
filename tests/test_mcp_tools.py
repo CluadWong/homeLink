@@ -97,23 +97,16 @@ def test_registers_six_tools() -> None:
     assert scene.inputSchema["properties"]["confirm"]["default"] is False
 
 
-def _client_with_transport(handler, monkeypatch: pytest.MonkeyPatch) -> client.HomeLinkClient:
-    """用 MockTransport 替换 AsyncClient，构造指向假后端的客户端。"""
+def _client_with_transport(handler) -> client.HomeLinkClient:
+    """用注入 MockTransport 的客户端，指向假后端。"""
 
     settings = config.Settings(
         base_url="http://backend.test", token="", timeout=5.0, actor="butler-agent"
     )
-    real_client = httpx.AsyncClient
-
-    def factory(*args, **kwargs):
-        kwargs["transport"] = httpx.MockTransport(handler)
-        return real_client(*args, **kwargs)
-
-    monkeypatch.setattr(client.httpx, "AsyncClient", factory)
-    return client.HomeLinkClient(settings)
+    return client.HomeLinkClient(settings, transport=httpx.MockTransport(handler))
 
 
-def test_request_sends_actor_and_trace_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_request_sends_actor_and_trace_headers() -> None:
     captured: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -121,21 +114,21 @@ def test_request_sends_actor_and_trace_headers(monkeypatch: pytest.MonkeyPatch) 
         captured["trace_id"] = request.headers.get("X-Trace-Id", "")
         return httpx.Response(200, json={"success": True, "result": {"ok": 1}, "trace_id": "t"})
 
-    client_obj = _client_with_transport(handler, monkeypatch)
+    client_obj = _client_with_transport(handler)
     asyncio.run(client_obj.find_devices())
 
     assert captured["actor"] == "butler-agent"
     assert len(captured["trace_id"]) == 8  # secrets.token_hex(4)
 
 
-def test_transport_error_carries_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_transport_error_carries_trace_id() -> None:
     captured: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["trace_id"] = request.headers.get("X-Trace-Id", "")
         raise httpx.ConnectError("boom", request=request)
 
-    client_obj = _client_with_transport(handler, monkeypatch)
+    client_obj = _client_with_transport(handler)
 
     with pytest.raises(errors.HomeLinkError) as exc_info:
         asyncio.run(client_obj.snapshot())
@@ -144,3 +137,15 @@ def test_transport_error_carries_trace_id(monkeypatch: pytest.MonkeyPatch) -> No
     assert error.code == "UNREACHABLE"
     assert error.trace_id == captured["trace_id"]
     assert f"trace_id={captured['trace_id']}" in str(error)
+
+
+def test_lifespan_creates_and_closes_client() -> None:
+    async def run() -> None:
+        async with server._lifespan(server.mcp) as http_client:
+            assert isinstance(http_client, client.HomeLinkClient)
+            http_client._http()  # 首次请求时惰性创建
+            assert http_client._http_client is not None
+        # 退出 lifespan 后内部连接池已关闭
+        assert http_client._http_client is None
+
+    asyncio.run(run())

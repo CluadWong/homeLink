@@ -18,8 +18,33 @@ _AGENT_PREFIX = "/api/agent"
 
 
 class HomeLinkClient:
-    def __init__(self, settings: Settings) -> None:
+    """长生命周期客户端：内部持有一个 httpx.AsyncClient 并跨请求复用连接池。
+
+    `transport` 仅供测试注入（MockTransport）；生产路径不传，走默认连接池。
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._settings = settings
+        self._transport = transport
+        self._http_client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        """惰性创建 AsyncClient：首次请求建连，之后复用，避免每请求一次 TCP 握手。"""
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=self._settings.timeout, transport=self._transport
+            )
+        return self._http_client
+
+    async def aclose(self) -> None:
+        """关闭内部连接池；关闭后再次请求会重建客户端。"""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
     async def _request(
         self,
@@ -41,10 +66,9 @@ class HomeLinkClient:
             headers["Authorization"] = f"Bearer {self._settings.token}"
 
         try:
-            async with httpx.AsyncClient(timeout=self._settings.timeout) as client:
-                response = await client.request(
-                    method, url, params=params, json=body, headers=headers
-                )
+            response = await self._http().request(
+                method, url, params=params, json=body, headers=headers
+            )
         except httpx.TimeoutException as exc:
             raise HomeLinkError(
                 "GATEWAY_TIMEOUT",
