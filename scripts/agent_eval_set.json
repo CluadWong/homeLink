@@ -26,7 +26,7 @@
   {"text": "把风扇关小一点", "expect": ["home_control_device"]},
   {"text": "风扇模式换一下", "expect": ["home_control_device"]},
   {"text": "帮我打开风扇", "expect": ["home_control_device"]},
-  {"text": "风扇定时关掉", "expect": ["home_control_device"]},
+  {"text": "风扇定时关掉", "expect_any": ["home_find_devices", "home_get_home_snapshot"], "forbid": ["home_control_device"]},
   {"text": "让风扇停下来", "expect": ["home_control_device"]},
 
   {"text": "把客厅灯调暗一点", "forbid": ["home_control_device"]},
