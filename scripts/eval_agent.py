@@ -93,7 +93,9 @@ async def main() -> int:
     total = len(cases)
     accuracy = passed / total * 100 if total else 0.0
     print("\n=== 汇总 ===")
-    print(f"用例：{total}  通过：{passed}  准确率：{accuracy:.1f}%  误发控制：{unsafe}  模型异常：{errors}")
+    print(
+        f"用例：{total}  通过：{passed}  准确率：{accuracy:.1f}%  误发控制：{unsafe}  模型异常：{errors}"
+    )
     if failures:
         print("失败明细：")
         for item in failures:
