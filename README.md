@@ -29,12 +29,13 @@ powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
 powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 ```
 
-安装后有三个任务：
+安装后有四个任务：
 
 | 任务 | 触发 | 行为 |
 | --- | --- | --- |
 | `HomeLinkService` | 开机（以 SYSTEM 运行，无需登录） | 后台静默执行 `scripts\service\run-service.cmd`，启动输出含访问地址，写 `logs\service.log` |
 | `HomeLinkAgent` | 开机（以 SYSTEM 运行） | 常驻 Agent 服务（`homelink-agentd`，127.0.0.1:8100），日志写 `logs\agent.log` |
+| `HomeLinkBackup` | 每天 03:00（以 SYSTEM 运行） | 在线快照数据库到 `backups\`（默认保留 7 份），日志写 `logs\backup.log` |
 | `HomeLinkAddresses` | 用户登录 | 弹出终端执行 `scripts\service\show-addresses.cmd`，只显示当前访问地址，不重复启动服务 |
 
 - Agent 任务依赖 Ollama 已在运行；Ollama 未就绪时 daemon 会照常启动，首轮提问返回 503。
@@ -51,7 +52,7 @@ python scripts\rotate_logs.py             # logs\ 下超 5 MB 的 .log/.jsonl �
 ```
 
 - 备份用 SQLite 在线快照，**服务不用停**；备份后自动做 integrity_check，坏文件不留。
-- 学码数据全在库里，建议隔几天跑一次 `backup.py`（可用计划任务定时），`--keep` 控制保留份数。
+- 学码数据全在库里，`install-service.ps1` 已注册 `HomeLinkBackup` 每天 03:00 自动备份（保留 7 份）；手动跑 `backup.py` 也随时可用，`--keep` 控制保留份数。
 - 恢复前先停服务；脚本会先校验备份、恢复后复检，坏备份直接拒绝且不动现有库。
 
 

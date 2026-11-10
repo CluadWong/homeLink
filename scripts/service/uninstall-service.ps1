@@ -2,8 +2,8 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 #
-# 停止并删除 HomeLinkService（开机启动）、HomeLinkAgent（常驻 Agent 服务）
-# 与 HomeLinkAddresses（登录后显示地址）。
+# 停止并删除 HomeLinkService（开机启动）、HomeLinkAgent（常驻 Agent 服务）、
+# HomeLinkBackup（每日备份）与 HomeLinkAddresses（登录后显示地址）。
 # 旧项目任务 JJButlerService 默认保持停用；加 -RestoreOldService 可重新启用它。
 
 [CmdletBinding()]
@@ -21,6 +21,7 @@ Start-Transcript -Path (Join-Path $logsDir 'service-install.log') -Append | Out-
 $oldTaskName = 'JJButlerService'
 $serviceTaskName = 'HomeLinkService'
 $agentTaskName = 'HomeLinkAgent'
+$backupTaskName = 'HomeLinkBackup'
 $addressTaskName = 'HomeLinkAddresses'
 
 function Assert-Admin {
@@ -34,7 +35,7 @@ function Assert-Admin {
 try {
     Assert-Admin
 
-    foreach ($name in @($serviceTaskName, $agentTaskName, $addressTaskName)) {
+    foreach ($name in @($serviceTaskName, $agentTaskName, $backupTaskName, $addressTaskName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) {
             Write-Host "未找到任务 $name，跳过。"
