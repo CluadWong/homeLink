@@ -55,7 +55,7 @@
 
 管理端专用、**不**给模型的能力：单设备详情 `GET /api/agent/devices/{id}`、元数据写入 `PUT .../metadata`、场景增删查（`GET/POST/DELETE /api/agent/scenes`）、命令结果查询 `GET /api/agent/commands/{request_id}`。这些由人、脚本或运维流程调用。
 
-可选请求头 `X-Actor`（≤64 字符，默认 `user`），用于把调用方写进审计；模型不必感知。
+可选请求头 `X-Actor`（≤64 字符，默认 `user`），用于把调用方写进审计；模型不必感知。MCP 客户端（`homelink_mcp`）会自动带上 `X-Actor`（默认 `butler-agent`，经 `HOMELINK_ACTOR` 配置，超长按 64 截断）与 `X-Trace-Id`（每请求生成 8 位），后端会采纳传入的 `X-Trace-Id`，据此把 MCP 日志、Agent 审计与后端 `audit_logs` 串成一条链。
 
 ## 3. Function Schema
 

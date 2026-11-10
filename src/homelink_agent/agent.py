@@ -18,6 +18,7 @@ from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings
 from homelink_agent.llm import OllamaError, chat, to_ollama_tool
 from homelink_agent.prompt import SYSTEM_PROMPT, history_messages
+from homelink_mcp.config import DEFAULT_ACTOR
 
 _CONSENT_RE = re.compile(r"确认|确定|同意|可以|好的|好|是的|开吧|执行|没问题")
 _DEBUG = os.environ.get("AGENT_DEBUG") == "1"
@@ -268,4 +269,6 @@ class HomeAgent:
             env["HOMELINK_API_TOKEN"] = self._settings.homelink_token
         else:
             env.pop("HOMELINK_API_TOKEN", None)
+        # 审计身份：未显式配置时也固定为 butler-agent，保证后端审计能识别 Agent 来源。
+        env.setdefault("HOMELINK_ACTOR", DEFAULT_ACTOR)
         return env

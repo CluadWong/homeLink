@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 from urllib.parse import quote
 
@@ -29,7 +30,13 @@ class HomeLinkClient:
         body: dict[str, Any] | None = None,
     ) -> Any:
         url = f"{self._settings.base_url}{_AGENT_PREFIX}{path}"
-        headers = {"Accept": "application/json"}
+        # 每次请求生成 trace_id：后端中间件会采纳传入的 X-Trace-Id，据此串起审计链。
+        trace_id = secrets.token_hex(4)
+        headers = {
+            "Accept": "application/json",
+            "X-Actor": self._settings.actor,
+            "X-Trace-Id": trace_id,
+        }
         if self._settings.token:
             headers["Authorization"] = f"Bearer {self._settings.token}"
 
@@ -42,11 +49,13 @@ class HomeLinkClient:
             raise HomeLinkError(
                 "GATEWAY_TIMEOUT",
                 f"请求 {url} 超时（{self._settings.timeout:g}s）",
+                trace_id=trace_id,
             ) from exc
         except httpx.HTTPError as exc:
             raise HomeLinkError(
                 "UNREACHABLE",
                 f"连不上 HomeLink 服务 {self._settings.base_url}",
+                trace_id=trace_id,
             ) from exc
 
         try:
@@ -56,12 +65,14 @@ class HomeLinkClient:
                 "BAD_RESPONSE",
                 f"服务返回的不是 JSON（HTTP {response.status_code}）",
                 status=response.status_code,
+                trace_id=trace_id,
             ) from exc
         if not isinstance(payload, dict):
             raise HomeLinkError(
                 "BAD_RESPONSE",
                 "服务返回的 JSON 不是对象",
                 status=response.status_code,
+                trace_id=trace_id,
             )
         if payload.get("success") is True:
             return payload.get("result")

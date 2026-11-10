@@ -143,7 +143,7 @@
 
 ### 2.10 Agent 能力（12）
 
-前缀 `/api/agent`，成功统一返回 `{success, result, trace_id}`。请求头可选 `X-Actor`（≤ 64 字符，默认 `user`），只用于记录调用方，不参与鉴权。
+前缀 `/api/agent`，成功统一返回 `{success, result, trace_id}`。请求头可选 `X-Actor`（≤ 64 字符，默认 `user`），只用于记录调用方，不参与鉴权；Agent 侧 MCP 客户端固定发送 `X-Actor: butler-agent`（`HOMELINK_ACTOR` 可覆盖）与每请求生成的 `X-Trace-Id`，审计按 `actor` 与 `trace_id` 串链。
 
 | 能力 | 端点 |
 | --- | --- |

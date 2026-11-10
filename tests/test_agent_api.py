@@ -297,6 +297,25 @@ def test_scene_run_rejects_undeclared_fields(client, context):
     assert _command_count(context) == 0
 
 
+def test_actor_header_reaches_command_records(client, context):
+    device_id, _ = _make_device(context, client)
+
+    response = client.post(
+        "/api/agent/control",
+        json={"device_id": device_id, "command": "开机", "request_id": "req-actor"},
+        headers={"X-Actor": "butler-agent", "X-Trace-Id": "abcd1234"},
+    )
+    assert response.status_code == 200
+    assert response.json()["trace_id"] == "abcd1234"  # 后端采纳传入的链路 ID
+
+    with context.db.reader() as conn:
+        row = conn.execute(
+            "SELECT actor, trace_id FROM command_requests WHERE request_id = 'req-actor'"
+        ).fetchone()
+    assert row["actor"] == "butler-agent"
+    assert row["trace_id"] == "abcd1234"
+
+
 def test_automations_are_explicitly_not_supported(client):
     response = client.post("/api/agent/automations", json={})
     assert response.status_code == 501

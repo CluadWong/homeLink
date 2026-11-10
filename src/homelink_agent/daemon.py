@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from homelink_agent.agent import HomeAgent
 from homelink_agent.config import AgentSettings, load_settings
 from homelink_agent.llm import OllamaError, to_ollama_tool, warm_model
+from homelink_mcp.config import DEFAULT_ACTOR
 
 _HISTORY_CAP = 20  # 保留最近 10 轮，防止上下文无限膨胀
 
@@ -109,6 +110,8 @@ class McpConnection:
             env["HOMELINK_API_TOKEN"] = self._settings.homelink_token
         else:
             env.pop("HOMELINK_API_TOKEN", None)
+        # 审计身份：未显式配置时也固定为 butler-agent，保证后端审计能识别 Agent 来源。
+        env.setdefault("HOMELINK_ACTOR", DEFAULT_ACTOR)
         return env
 
 
