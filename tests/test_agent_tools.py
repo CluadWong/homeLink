@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,22 +14,26 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from mcp import ClientSession  # noqa: E402
-
-from homelink_agent.agent import (
+from homelink_agent.agent import (  # noqa: E402
     HomeAgent,
     _looks_like_consent,
+    _Pending,
     _turn_request_id,
     _unwrap,
 )  # noqa: E402
 from homelink_agent.audit import AuditLog  # noqa: E402
 from homelink_agent.config import load_settings  # noqa: E402
 from homelink_agent.llm import OllamaError, to_ollama_tool  # noqa: E402
+from mcp import ClientSession  # noqa: E402
 
 
 @pytest.fixture
 def agent() -> HomeAgent:
     return HomeAgent(replace(load_settings(), audit_path="off"))
+
+
+def _pending(target: str, *, age: float = 0.0) -> _Pending:
+    return _Pending(target, time.monotonic() - age)
 
 
 def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,6 +46,8 @@ def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.model == "qwen3.5:9b-q4_K_M"
     assert settings.homelink_base_url == "http://127.0.0.1:8000"
     assert settings.max_steps == 6
+    assert settings.confirm_ttl == 120.0
+    assert settings.queue_timeout == 30.0
 
 
 @pytest.mark.parametrize(
@@ -51,7 +58,11 @@ def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         ("好的", True),
         ("打开卧室风扇", False),
         ("", False),
-        ("同意，顺便把客厅灯也关了看看现在几点了", False),
+        ("同意，顺便把客厅灯也关了看看现在几点了", False),  # 长句夹带确认词
+        ("不要确认", False),  # 同意词被拒绝词压制
+        ("取消", False),
+        ("先不", False),
+        ("不做了", False),
     ],
 )
 def test_consent_detection(text: str, expected: bool) -> None:
@@ -61,9 +72,10 @@ def test_consent_detection(text: str, expected: bool) -> None:
 def test_guard_blocks_self_confirmation(agent: HomeAgent) -> None:
     arguments = {"device_id": "lock-1", "command": "开锁", "confirm": True}
 
-    blocked = agent._guard_confirm(arguments, pending=None)
+    blocked, granted = agent._guard_confirm(arguments, pending=None)
 
     assert blocked["confirm"] is False
+    assert granted is False
     assert arguments["confirm"] is True  # 不修改入参
 
 
@@ -71,23 +83,30 @@ def test_guard_allows_pending_device_with_consent(agent: HomeAgent) -> None:
     agent._user_confirmed = True
     arguments = {"device_id": "lock-1", "command": "开锁", "confirm": True}
 
-    assert agent._guard_confirm(arguments, pending="lock-1")["confirm"] is True
-    assert agent._guard_confirm(arguments, pending="lock-2")["confirm"] is False
+    _, granted_same = agent._guard_confirm(arguments, pending=_pending("lock-1"))
+    _, granted_other = agent._guard_confirm(arguments, pending=_pending("lock-2"))
+
+    assert granted_same is True
+    assert granted_other is False  # 跨设备不串用
 
 
 def test_guard_requires_consent(agent: HomeAgent) -> None:
     agent._user_confirmed = False
     arguments = {"device_id": "lock-1", "command": "开锁", "confirm": True}
 
-    assert agent._guard_confirm(arguments, pending="lock-1")["confirm"] is False
+    blocked, granted = agent._guard_confirm(arguments, pending=_pending("lock-1"))
+
+    assert blocked["confirm"] is False
+    assert granted is False
 
 
 def test_guard_blocks_scene_self_confirmation(agent: HomeAgent) -> None:
     arguments = {"scene_id": "sc_1", "confirm": True}
 
-    blocked = agent._guard_scene_confirm(arguments, pending=None)
+    blocked, granted = agent._guard_scene_confirm(arguments, pending=None)
 
     assert blocked["confirm"] is False
+    assert granted is False
     assert arguments["confirm"] is True  # 不修改入参
 
 
@@ -95,23 +114,28 @@ def test_guard_scene_allows_pending_scene_with_consent(agent: HomeAgent) -> None
     agent._user_confirmed = True
     arguments = {"scene_id": "sc_1", "confirm": True}
 
-    assert agent._guard_scene_confirm(arguments, pending="sc_1")["confirm"] is True
-    assert agent._guard_scene_confirm(arguments, pending="sc_2")["confirm"] is False
+    _, granted_same = agent._guard_scene_confirm(arguments, pending=_pending("sc_1"))
+    _, granted_other = agent._guard_scene_confirm(arguments, pending=_pending("sc_2"))
+
+    assert granted_same is True
+    assert granted_other is False
 
 
 def test_scene_and_device_pending_do_not_share(agent: HomeAgent) -> None:
     """同 ID 也互不串用：场景待确认不解锁设备，设备待确认不解锁场景。"""
 
     agent._user_confirmed = True
-    agent._pending_scene = "same_id"
+    agent._pending_scene = _pending("same_id")
 
     device_call = {"device_id": "same_id", "command": "开", "confirm": True}
-    assert agent._guard_confirm(device_call, pending=None)["confirm"] is False
+    _, granted_device = agent._guard_confirm(device_call, pending=None)
+    assert granted_device is False
 
-    agent._pending_device = "same_id"
+    agent._pending_device = _pending("same_id")
     agent._pending_scene = None
     scene_call = {"scene_id": "same_id", "confirm": True}
-    assert agent._guard_scene_confirm(scene_call, pending=None)["confirm"] is False
+    _, granted_scene = agent._guard_scene_confirm(scene_call, pending=None)
+    assert granted_scene is False
 
 
 class _RecordingSession:
@@ -224,12 +248,12 @@ def test_call_tool_scene_blocks_self_confirm_and_sets_pending(agent: HomeAgent) 
     )
 
     assert session.calls[0][1]["confirm"] is False  # 模型不能自己补 confirm
-    assert agent._pending_scene == "sc_1"
+    assert agent._pending_scene is not None and agent._pending_scene.target == "sc_1"
     assert agent._pending_device is None  # 与设备待确认互不串用
 
 
 def test_call_tool_scene_success_clears_pending(agent: HomeAgent) -> None:
-    agent._pending_scene = "sc_1"
+    agent._pending_scene = _pending("sc_1")
     session = _RecordingSession()
     call = {
         "function": {"name": "home_run_scene", "arguments": {"scene_id": "sc_1"}},
@@ -314,16 +338,19 @@ def test_settings_default_audit_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert load_settings().audit_path == "logs/agent-audit.jsonl"
 
 
-def test_confirm_downgrade_is_audited(tmp_path: Path) -> None:
+def test_confirm_denied_is_audited(tmp_path: Path) -> None:
     settings = replace(load_settings(), audit_path=str(tmp_path / "audit.jsonl"))
     agent = HomeAgent(settings)
-    agent._pending_device = "dev_1"
+    agent._pending_device = _pending("dev_1")
 
-    guarded = agent._guard_confirm({"device_id": "dev_1", "command": "开关", "confirm": True}, None)
+    guarded, granted = agent._guard_confirm(
+        {"device_id": "dev_1", "command": "开关", "confirm": True}, None
+    )
 
     assert guarded["confirm"] is False
+    assert granted is False
     record = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
-    assert record["event"] == "confirm_downgraded"
+    assert record["event"] == "confirm_denied"
     assert record["device_id"] == "dev_1"
     assert record["reason"] == "本轮无明确用户同意"
 
@@ -333,24 +360,121 @@ def test_confirmed_pending_device_keeps_confirm(tmp_path: Path) -> None:
     agent = HomeAgent(settings)
     agent._user_confirmed = True
 
-    allowed = agent._guard_confirm(
-        {"device_id": "dev_1", "command": "开关", "confirm": True}, "dev_1"
+    allowed, granted = agent._guard_confirm(
+        {"device_id": "dev_1", "command": "开关", "confirm": True}, _pending("dev_1")
     )
 
     assert allowed["confirm"] is True
-    assert not (tmp_path / "audit.jsonl").exists()
+    assert granted is True
+    assert not (tmp_path / "audit.jsonl").exists()  # guard 本身不写审计；granted 由 _call_tool 记
 
 
-def test_scene_confirm_downgrade_is_audited(tmp_path: Path) -> None:
+def test_scene_confirm_denied_is_audited(tmp_path: Path) -> None:
     settings = replace(load_settings(), audit_path=str(tmp_path / "audit.jsonl"))
     agent = HomeAgent(settings)
-    agent._pending_scene = "sc_1"
+    agent._pending_scene = _pending("sc_1")
 
-    guarded = agent._guard_scene_confirm({"scene_id": "sc_2", "confirm": True}, None)
+    guarded, _ = agent._guard_scene_confirm({"scene_id": "sc_2", "confirm": True}, None)
 
     assert guarded["confirm"] is False
     record = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
-    assert record["event"] == "confirm_downgraded"
+    assert record["event"] == "confirm_denied"
     assert record["scene_id"] == "sc_2"
     assert record["pending"] == "sc_1"
     assert record["reason"] == "场景不在待确认清单"
+
+
+# ---------------------------------------------------------------- 过期与一次性
+
+
+def test_stale_pending_expires_and_is_audited(tmp_path: Path) -> None:
+    settings = replace(load_settings(), audit_path=str(tmp_path / "audit.jsonl"), confirm_ttl=120.0)
+    agent = HomeAgent(settings)
+    stale = _pending("dev_1", age=121.0)
+
+    assert agent._valid_pending(stale, key="device_id") is None
+    record = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert record["event"] == "confirm_expired"
+    assert record["device_id"] == "dev_1"
+
+
+def test_fresh_pending_survives_ttl_check(tmp_path: Path) -> None:
+    settings = replace(load_settings(), audit_path=str(tmp_path / "audit.jsonl"), confirm_ttl=120.0)
+    agent = HomeAgent(settings)
+    fresh = _pending("dev_1")
+
+    assert agent._valid_pending(fresh, key="device_id") is fresh
+    assert not (tmp_path / "audit.jsonl").exists()
+
+
+def _confirm_attempt_chat(*, device: bool, final: str) -> Any:
+    """第一轮返回一次 confirm 工具调用，之后返回最终回复。"""
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        if any("tool_calls" in item for item in messages):
+            return {"content": final}
+        call = (
+            {
+                "function": {
+                    "name": "home_control_device",
+                    "arguments": {"device_id": "dev_1", "command": "开锁", "confirm": True},
+                }
+            }
+            if device
+            else {
+                "function": {
+                    "name": "home_run_scene",
+                    "arguments": {"scene_id": "sc_1", "confirm": True},
+                }
+            }
+        )
+        return {"tool_calls": [call]}
+
+    return fake_chat
+
+
+def test_expired_pending_blocks_grant_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """上一轮待确认超过 TTL 后，本轮即使说「确认」也不放行。"""
+
+    monkeypatch.setattr(
+        "homelink_agent.agent.chat", _confirm_attempt_chat(device=True, final="已处理")
+    )
+    settings = replace(load_settings(), audit_path=str(tmp_path / "audit.jsonl"), confirm_ttl=0.0)
+    agent = HomeAgent(settings)
+    agent._pending_device = _pending("dev_1", age=1.0)  # TTL=0：一秒前即过期
+
+    reply = asyncio.run(agent.respond(cast(ClientSession, _RecordingSession()), [], "确认", None))
+
+    assert reply == "已处理"
+    events = [
+        json.loads(line)["event"]
+        for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert "confirm_expired" in events
+    assert "confirm_granted" not in events  # 过期项不放行
+
+
+def test_granted_confirm_is_one_shot_and_audited(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """待确认 + 明确同意：放行、记 confirm_granted，且授权本轮用后即清。"""
+
+    monkeypatch.setattr(
+        "homelink_agent.agent.chat", _confirm_attempt_chat(device=True, final="已开锁")
+    )
+    settings = replace(load_settings(), audit_path=str(tmp_path / "audit.jsonl"))
+    agent = HomeAgent(settings)
+    agent._pending_device = _pending("dev_1")
+
+    asyncio.run(agent.respond(cast(ClientSession, _RecordingSession()), [], "确认", None))
+
+    assert agent._pending_device is None  # 一次性使用：执行后清除
+    events = [
+        json.loads(line)["event"]
+        for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events.count("confirm_granted") == 1

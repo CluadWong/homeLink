@@ -5,13 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import sys
+import time
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
-from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from homelink_agent.audit import AuditLog
@@ -19,9 +18,20 @@ from homelink_agent.config import AgentSettings
 from homelink_agent.llm import OllamaError, chat, to_ollama_tool
 from homelink_agent.prompt import SYSTEM_PROMPT, history_messages
 from homelink_mcp.config import DEFAULT_ACTOR
+from mcp import ClientSession, StdioServerParameters
 
-_CONSENT_RE = re.compile(r"确认|确定|同意|可以|好的|好|是的|开吧|执行|没问题")
+_CONSENT_WORDS = frozenset(
+    {"确认", "确定", "同意", "可以", "好的", "好", "是的", "开吧", "执行", "没问题"}
+)
+_DENY_WORDS = frozenset({"取消", "不要", "不行", "别", "不"})
 _DEBUG = os.environ.get("AGENT_DEBUG") == "1"
+
+
+class _Pending(NamedTuple):
+    """待确认项：目标 ID + 创建时刻（monotonic），超过 confirm_ttl 即作废。"""
+
+    target: str
+    created: float
 
 
 def _debug(message: str) -> None:
@@ -30,10 +40,14 @@ def _debug(message: str) -> None:
 
 
 def _looks_like_consent(text: str) -> bool:
-    """短消息里出现明确同意词才算同意，避免长句里夹带「确认」被误判。"""
+    """短消息、含明确同意词、且不含拒绝词才算同意，避免长句夹带「确认」被误判。"""
 
     stripped = text.strip()
-    return len(stripped) <= 12 and _CONSENT_RE.search(stripped) is not None
+    if not stripped or len(stripped) > 12:
+        return False
+    if any(word in stripped for word in _DENY_WORDS):
+        return False
+    return any(word in stripped for word in _CONSENT_WORDS)
 
 
 def _unwrap(group: BaseExceptionGroup) -> BaseException:
@@ -63,8 +77,8 @@ class HomeAgent:
         self._settings = settings
         self._on_tool = on_tool
         self._audit = AuditLog(settings.audit_path)
-        self._pending_device: str | None = None
-        self._pending_scene: str | None = None
+        self._pending_device: _Pending | None = None
+        self._pending_scene: _Pending | None = None
         self._user_confirmed = False
 
     async def run(self, user_text: str, history: list[dict[str, str]] | None = None) -> str:
@@ -99,10 +113,11 @@ class HomeAgent:
     ) -> str:
         """完整一轮对话：常驻服务与一次性路径共用；session 由调用方提供并保活。"""
 
-        # 上一轮被拦下的设备/场景只对这一轮有效，避免「下次随口说好」被当成授权。
-        previous_pending = self._pending_device
-        previous_pending_scene = self._pending_scene
+        # 上一轮被拦下的设备/场景只对这一轮有效，且超过 confirm_ttl 即作废，
+        # 避免「下次随口说好」被当成授权。
+        previous_pending = self._valid_pending(self._pending_device, key="device_id")
         self._pending_device = None
+        previous_pending_scene = self._valid_pending(self._pending_scene, key="scene_id")
         self._pending_scene = None
         self._user_confirmed = _looks_like_consent(user_text)
         turn_id = uuid.uuid4().hex[:8]  # 本轮幂等键前缀，见 _turn_request_id
@@ -110,8 +125,8 @@ class HomeAgent:
             "turn_start",
             user=user_text,
             consent=self._user_confirmed,
-            pending=previous_pending,
-            pending_scene=previous_pending_scene,
+            pending=previous_pending.target if previous_pending else None,
+            pending_scene=previous_pending_scene.target if previous_pending_scene else None,
         )
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -158,9 +173,9 @@ class HomeAgent:
         self,
         session: ClientSession,
         call: dict[str, Any],
-        previous_pending: str | None,
+        previous_pending: _Pending | None,
         turn_id: str,
-        previous_pending_scene: str | None = None,
+        previous_pending_scene: _Pending | None = None,
     ) -> dict[str, Any]:
         function = call.get("function") or {}
         name = str(function.get("name") or "")
@@ -174,14 +189,23 @@ class HomeAgent:
             arguments = {}
 
         if name == "home_control_device":
-            arguments = self._guard_confirm(arguments, previous_pending)
+            pending = previous_pending or self._pending_device
+            arguments, granted = self._guard_confirm(arguments, pending)
+            if granted and pending is not None:
+                self._audit.write("confirm_granted", device_id=pending.target)
+                # 一次性使用：授权随本轮执行销毁；若服务端再次拦截会重新登记待确认。
+                self._pending_device = None
             # 幂等键由运行时注入并覆盖模型编造的值：同轮同设备同命令复用，重试不会重复发红外。
             arguments["request_id"] = _turn_request_id(
                 turn_id, str(arguments.get("device_id") or ""), str(arguments.get("command") or "")
             )
         elif name == "home_run_scene":
             # 场景确认与设备确认互不串用：待确认键为 scene:<scene_id> 语义（单独存 _pending_scene）。
-            arguments = self._guard_scene_confirm(arguments, previous_pending_scene)
+            pending = previous_pending_scene or self._pending_scene
+            arguments, granted = self._guard_scene_confirm(arguments, pending)
+            if granted and pending is not None:
+                self._audit.write("confirm_granted", scene_id=pending.target)
+                self._pending_scene = None
 
         result = await session.call_tool(name, arguments)
         text = "\n".join(
@@ -203,42 +227,66 @@ class HomeAgent:
             text = "工具执行失败：" + text
             if "CONFIRMATION_REQUIRED" in text:
                 if name == "home_run_scene":
-                    self._pending_scene = str(arguments.get("scene_id") or "") or None
+                    target = str(arguments.get("scene_id") or "")
+                    if target:
+                        self._pending_scene = _Pending(target, time.monotonic())
+                        self._audit.write("confirm_requested", scene_id=target)
                 else:
-                    self._pending_device = str(arguments.get("device_id") or "") or None
+                    target = str(arguments.get("device_id") or "")
+                    if target:
+                        self._pending_device = _Pending(target, time.monotonic())
+                        self._audit.write("confirm_requested", device_id=target)
         elif name == "home_run_scene":
             self._pending_scene = None
         else:
             self._pending_device = None
         return {"role": "tool", "tool_name": name, "content": text or "（无输出）"}
 
-    def _guard_confirm(self, arguments: dict[str, Any], pending: str | None) -> dict[str, Any]:
+    def _valid_pending(self, pending: _Pending | None, *, key: str) -> _Pending | None:
+        """过期检查：超过 confirm_ttl 的待确认项作废并审计 confirm_expired。"""
+
+        if pending is None:
+            return None
+        if time.monotonic() - pending.created > self._settings.confirm_ttl:
+            self._audit.write("confirm_expired", **{key: pending.target})
+            return None
+        return pending
+
+    def _guard_confirm(
+        self, arguments: dict[str, Any], pending: _Pending | None
+    ) -> tuple[dict[str, Any], bool]:
         """模型不能自己补 consent：只有上一轮被拦下的同设备 + 本轮明确同意才放行。"""
 
         if not arguments.get("confirm"):
-            return arguments
+            return arguments, False
         device_id = str(arguments.get("device_id") or "")
         # 两种来源算「已问过」：上一轮被拦下的设备，或本轮刚被服务端拦下的设备。
         pending = pending or self._pending_device
-        if self._user_confirmed and pending and device_id == pending:
-            return arguments
-        return self._downgrade_confirm(
-            arguments, target=device_id, pending=pending, key="device_id", label="设备"
+        if self._user_confirmed and pending and device_id == pending.target:
+            return arguments, True
+        return (
+            self._downgrade_confirm(
+                arguments, target=device_id, pending=pending, key="device_id", label="设备"
+            ),
+            False,
         )
 
     def _guard_scene_confirm(
-        self, arguments: dict[str, Any], pending: str | None
-    ) -> dict[str, Any]:
+        self, arguments: dict[str, Any], pending: _Pending | None
+    ) -> tuple[dict[str, Any], bool]:
         """场景与设备各自维护待确认状态，互不串用。"""
 
         if not arguments.get("confirm"):
-            return arguments
+            return arguments, False
         scene_id = str(arguments.get("scene_id") or "")
         pending = pending or self._pending_scene
-        if self._user_confirmed and pending and scene_id == pending:
-            return arguments
-        return self._downgrade_confirm(
-            arguments, target=scene_id, pending=pending, key="scene_id", label="场景"
+        if self._user_confirmed and pending and scene_id == pending.target:
+            return arguments, True
+        return (
+            self._downgrade_confirm(
+                arguments, target=scene_id, pending=pending, key="scene_id", label="场景"
+            ),
+            False,
         )
 
     def _downgrade_confirm(
@@ -246,17 +294,21 @@ class HomeAgent:
         arguments: dict[str, Any],
         *,
         target: str,
-        pending: str | None,
+        pending: _Pending | None,
         key: str,
         label: str,
     ) -> dict[str, Any]:
         blocked = dict(arguments)
         blocked["confirm"] = False
-        reason = f"{label}不在待确认清单" if pending and target != pending else "本轮无明确用户同意"
+        reason = (
+            f"{label}不在待确认清单"
+            if pending and target != pending.target
+            else "本轮无明确用户同意"
+        )
         self._audit.write(
-            "confirm_downgraded",
+            "confirm_denied",
             **{key: target},
-            pending=pending,
+            pending=pending.target if pending else None,
             reason=reason,
             user_confirmed=self._user_confirmed,
         )

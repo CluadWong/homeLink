@@ -17,6 +17,7 @@ DEFAULT_DAEMON_PORT = 8100
 DEFAULT_SESSION_TTL_MIN = 120
 DEFAULT_MAX_SESSIONS = 20
 DEFAULT_QUEUE_TIMEOUT = 30.0
+DEFAULT_CONFIRM_TTL = 120.0
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class AgentSettings:
     max_sessions: int
     daemon_token: str = ""
     queue_timeout: float = DEFAULT_QUEUE_TIMEOUT
+    confirm_ttl: float = DEFAULT_CONFIRM_TTL
 
 
 def _positive_int(raw: str, fallback: int) -> int:
@@ -75,4 +77,5 @@ def load_settings() -> AgentSettings:
         queue_timeout=_positive_float(
             os.environ.get("AGENTD_QUEUE_TIMEOUT", ""), DEFAULT_QUEUE_TIMEOUT
         ),
+        confirm_ttl=_positive_float(os.environ.get("AGENT_CONFIRM_TTL", ""), DEFAULT_CONFIRM_TTL),
     )
