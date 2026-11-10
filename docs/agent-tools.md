@@ -18,8 +18,8 @@
 6. state 是虚拟状态：控制成功后一律为 unknown，只有用户手动校正过才是 confirmed。永远不要声称「已确认打开/关闭」。
 
 【控制与幂等】
-7. 每次用户的新指令生成一个新的 request_id（UUIDv4 或 8~16 位随机串，≤64 字符）。只有重试同一条指令时才复用原 request_id；不同设备或不同功能绝不共用。
-8. request_id 冲突返回 409 CONFLICT 时，换一个新的 request_id 重发，不要改设备或改功能硬试。
+7. request_id 由运行时自动注入并覆盖你传入的值：同一轮里同一设备同一命令的重试会自动复用同一幂等键，你不需要也不应该自己编造。
+8. request_id 冲突返回 409 CONFLICT 时，换一轮新指令重发即可获得新幂等键（运行时会自动生成），不要改设备或改功能硬试。
 9. risk_level=high 的设备（门锁、燃气、烤箱、取暖器等）：先把「设备 + 动作」复述给用户并得到明确同意，再用 confirm=true 调用；未确认时接口返回 409 CONFIRMATION_REQUIRED。
 10. 执行包含高风险设备的场景前，先提示用户，再调用 home_run_scene。
 
@@ -320,7 +320,7 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
 **A. 「把卧室风扇打开」**
 
 1. `home_find_devices({room: "bedroom", device_type: "fan"})`
-2. 从 `capabilities` 里选「开关」→ `home_control_device({device_id, command: "开关", parameters: {}, request_id: "<新>"})`
+2. 从 `capabilities` 里选「开关」→ `home_control_device({device_id, command: "开关", parameters: {}})`，`request_id` 由运行时自动注入
 3. 回复「信号已发出」，不承诺风扇现在一定在转。
 
 **B. 「客厅灯调暗一点」**
@@ -341,8 +341,8 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
 
 **E. 超时后重试**
 
-1. 收到 `GATEWAY_TIMEOUT` → 不复用原 `request_id` 自动重发
-2. 告知用户「信号可能已发出，请确认设备状态」；用户要求再发一次时生成新的 `request_id`。
+1. 收到 `GATEWAY_TIMEOUT` → 不要在同一轮自动重发
+2. 告知用户「信号可能已发出，请确认设备状态」；用户要求再发一次时在新一轮里重新调用，运行时会生成新的 `request_id`。
 
 ## 7. MCP 服务（homelink_mcp）
 

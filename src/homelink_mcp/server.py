@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -82,7 +81,7 @@ async def home_get_home_snapshot(room: str | None = None) -> dict[str, Any]:
 async def home_control_device(
     device_id: str,
     command: str,
-    request_id: str | None = None,
+    request_id: str,
     parameters: dict[str, Any] | None = None,
     confirm: bool = False,
 ) -> dict[str, Any]:
@@ -91,7 +90,7 @@ async def home_control_device(
     Args:
         device_id: 设备 ID，来自 home_find_devices 或快照。
         command: 该设备 capabilities 中的 command 或 command_id；不在列表里就是做不到。
-        request_id: 幂等键。省略时服务端自动生成 UUID；重试同一条指令请复用原值。
+        request_id: 幂等键，由运行时注入，重试同一条指令会自动复用同一值，不要自己编造。
         parameters: 必须为空对象。红外码是整条回放，传亮度/温度等参数会被拒绝。
         confirm: risk_level 为 high 的设备须由用户明确同意后传 true，否则报 CONFIRMATION_REQUIRED。
 
@@ -103,7 +102,7 @@ async def home_control_device(
     return await _client().control_device(
         device_id=device_id,
         command=command,
-        request_id=request_id or str(uuid.uuid4()),
+        request_id=request_id,
         parameters=parameters or {},
         confirm=confirm,
     )

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import sys
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -42,6 +44,13 @@ def _unwrap(group: BaseExceptionGroup) -> BaseException:
             return found
     leaf = group.exceptions[0]
     return _unwrap(leaf) if isinstance(leaf, BaseExceptionGroup) else leaf
+
+
+def _turn_request_id(turn_id: str, device_id: str, command: str) -> str:
+    """一轮内的幂等键：同设备同命令重试天然复用，跨轮/跨设备/跨命令必然不同。"""
+
+    digest = hashlib.sha256(f"{device_id}\x00{command}".encode()).hexdigest()[:12]
+    return f"ag-{turn_id}-{digest}"
 
 
 class HomeAgent:
@@ -92,6 +101,7 @@ class HomeAgent:
         previous_pending = self._pending_device
         self._pending_device = None
         self._user_confirmed = _looks_like_consent(user_text)
+        turn_id = uuid.uuid4().hex[:8]  # 本轮幂等键前缀，见 _turn_request_id
         self._audit.write(
             "turn_start", user=user_text, consent=self._user_confirmed, pending=previous_pending
         )
@@ -117,7 +127,7 @@ class HomeAgent:
                     }
                 )
                 for call in calls:
-                    messages.append(await self._call_tool(session, call, previous_pending))
+                    messages.append(await self._call_tool(session, call, previous_pending, turn_id))
         except BaseExceptionGroup as group:
             # anyio 任务组会把模型/网络异常包成 ExceptionGroup，剥出来再抛
             error = _unwrap(group)
@@ -133,6 +143,7 @@ class HomeAgent:
         session: ClientSession,
         call: dict[str, Any],
         previous_pending: str | None,
+        turn_id: str,
     ) -> dict[str, Any]:
         function = call.get("function") or {}
         name = str(function.get("name") or "")
@@ -147,6 +158,10 @@ class HomeAgent:
 
         if name == "home_control_device":
             arguments = self._guard_confirm(arguments, previous_pending)
+            # 幂等键由运行时注入并覆盖模型编造的值：同轮同设备同命令复用，重试不会重复发红外。
+            arguments["request_id"] = _turn_request_id(
+                turn_id, str(arguments.get("device_id") or ""), str(arguments.get("command") or "")
+            )
 
         result = await session.call_tool(name, arguments)
         text = "\n".join(

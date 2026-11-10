@@ -1,20 +1,29 @@
-"""homelink_agent 纯逻辑回归：配置、同意判定、确认闸门、工具转换。"""
+"""homelink_agent 纯逻辑回归：配置、同意判定、确认闸门、幂等键注入、工具转换。"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 pytest.importorskip("mcp")
 
-from homelink_agent.agent import HomeAgent, _looks_like_consent, _unwrap
-from homelink_agent.audit import AuditLog
-from homelink_agent.config import load_settings
-from homelink_agent.llm import OllamaError, to_ollama_tool
+from mcp import ClientSession  # noqa: E402
+
+from homelink_agent.agent import (
+    HomeAgent,
+    _looks_like_consent,
+    _turn_request_id,
+    _unwrap,
+)  # noqa: E402
+from homelink_agent.audit import AuditLog  # noqa: E402
+from homelink_agent.config import load_settings  # noqa: E402
+from homelink_agent.llm import OllamaError, to_ollama_tool  # noqa: E402
 
 
 @pytest.fixture
@@ -71,6 +80,88 @@ def test_guard_requires_consent(agent: HomeAgent) -> None:
     arguments = {"device_id": "lock-1", "command": "开锁", "confirm": True}
 
     assert agent._guard_confirm(arguments, pending="lock-1")["confirm"] is False
+
+
+class _RecordingSession:
+    """记录 call_tool 入参的假 MCP 会话。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+        self.calls.append((name, arguments))
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")], isError=False)
+
+
+def test_turn_request_id_is_stable_within_turn() -> None:
+    assert _turn_request_id("abcd1234", "dev_1", "开") == _turn_request_id(
+        "abcd1234", "dev_1", "开"
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (("abcd1234", "dev_1", "开"), ("efgh5678", "dev_1", "开")),  # 换轮
+        (("abcd1234", "dev_1", "开"), ("abcd1234", "dev_2", "开")),  # 换设备
+        (("abcd1234", "dev_1", "开"), ("abcd1234", "dev_1", "关")),  # 换命令
+    ],
+)
+def test_turn_request_id_varies_across_turns_devices_commands(
+    first: tuple[str, str, str], second: tuple[str, str, str]
+) -> None:
+    assert _turn_request_id(*first) != _turn_request_id(*second)
+
+
+def test_turn_request_id_format() -> None:
+    request_id = _turn_request_id("abcd1234", "dev_1", "定时")
+
+    assert request_id.startswith("ag-abcd1234-")
+    assert 0 < len(request_id) <= 64
+
+
+def test_call_tool_injects_request_id_and_overrides_model_value(agent: HomeAgent) -> None:
+    session = _RecordingSession()
+    call = {
+        "function": {
+            "name": "home_control_device",
+            "arguments": {"device_id": "dev_1", "command": "开", "request_id": "模型编造的值"},
+        }
+    }
+
+    asyncio.run(
+        agent._call_tool(
+            cast(ClientSession, session), call, previous_pending=None, turn_id="abcd1234"
+        )
+    )
+
+    assert session.calls[0][1]["request_id"] == _turn_request_id("abcd1234", "dev_1", "开")
+
+
+def test_call_tool_reuses_request_id_for_retry_within_turn(agent: HomeAgent) -> None:
+    session = _RecordingSession()
+    call = {
+        "function": {
+            "name": "home_control_device",
+            "arguments": {"device_id": "dev_1", "command": "开"},
+        }
+    }
+
+    asyncio.run(
+        agent._call_tool(
+            cast(ClientSession, session), call, previous_pending=None, turn_id="abcd1234"
+        )
+    )
+    asyncio.run(
+        agent._call_tool(
+            cast(ClientSession, session), call, previous_pending=None, turn_id="abcd1234"
+        )
+    )
+
+    assert session.calls[0][1]["request_id"] == session.calls[1][1]["request_id"]
+    assert session.calls[0][1]["request_id"] != _turn_request_id(
+        "ffffffff", "dev_1", "开"
+    )  # 换了 turn_id 就不同
 
 
 def test_to_ollama_tool_flattens_nullable_fields() -> None:
