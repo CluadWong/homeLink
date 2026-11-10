@@ -109,6 +109,34 @@ async def home_control_device(
     )
 
 
+@mcp.tool()
+async def home_run_scene(scene_id: str) -> dict[str, Any]:
+    """按顺序执行一个已存在的场景。
+
+    Args:
+        scene_id: 场景 ID，来自 home_get_home_snapshot 返回的 scenes 列表。
+
+    Returns:
+        {"scene_id": str, "status": "sent" | "partial" | "failed",
+        "results": [{"device_id", "command", "status", "request_id" | "error_code", "message"}]}。
+        整体失败不抛错，按 results 逐条向用户汇报失败项。
+    """
+    return await _client().run_scene(scene_id)
+
+
+@mcp.tool()
+async def home_create_automation(rule: dict[str, Any] | None = None) -> dict[str, Any]:
+    """创建自动化规则（当前不支持，固定返回 NOT_SUPPORTED）。
+
+    Args:
+        rule: 规则草案，服务端不解析，仅用于表达意图。
+
+    Returns:
+        失败：not supported。需要定时能力时应告知用户改用手动触发场景或外部调度。
+    """
+    return await _client().create_automation(rule)
+
+
 def main() -> None:
     """以 stdio 传输启动 MCP 服务。"""
 

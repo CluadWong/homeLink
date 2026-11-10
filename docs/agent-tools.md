@@ -343,3 +343,30 @@ OpenAI function-calling 格式，可直接放进 `tools` 字段；其他框架�
 
 1. 收到 `GATEWAY_TIMEOUT` → 不复用原 `request_id` 自动重发
 2. 告知用户「信号可能已发出，请确认设备状态」；用户要求再发一次时生成新的 `request_id`。
+
+## 7. MCP 服务（homelink_mcp）
+
+上面 6 个能力已封装成 MCP 工具，传输方式为 stdio。
+
+```powershell
+pip install -e ".[mcp]"          # mcp 是可选依赖，不影响服务端本体
+python -m homelink_mcp           # 或 homelink-mcp
+```
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `HOMELINK_BASE_URL` | `http://127.0.0.1:8000` | 服务地址，不含 `/api` |
+| `HOMELINK_API_TOKEN` | 空 | 与服务端 `api.token` 一致；空 = 不鉴权 |
+| `HOMELINK_TIMEOUT` | `10` | 单次 HTTP 超时（秒） |
+
+用 Inspector 验证：
+
+```powershell
+npx @modelcontextprotocol/inspector
+# 命令行等价：--cli "<venv>\Scripts\python.exe" -m homelink_mcp --method tools/list
+```
+
+注意：Inspector 用白名单环境启动子进程，自定义环境变量不会透传。要连非默认地址（例如 mock 实例），用一个设置变量的包装脚本（`.ps1`）作为 Inspector 的命令，不要指望直接 `set HOMELINK_BASE_URL` 生效。
+
+工具面的错误以 MCP `isError` 返回，文本形如 `[NOT_FOUND] ... 先调用 home_find_devices ... trace_id=...`，模型可直接照着下一步行动。
+
