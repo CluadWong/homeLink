@@ -25,6 +25,8 @@ async def chat(
     }
     if tools:
         body["tools"] = tools
+    if settings.keep_alive:
+        body["keep_alive"] = settings.keep_alive  # 常驻服务用它把模型留在显存里
 
     url = f"{settings.ollama_url}/api/chat"
     try:
@@ -46,6 +48,20 @@ async def chat(
     if not isinstance(message, dict):
         raise OllamaError("Ollama 响应缺少 message 字段")
     return message
+
+
+async def warm_model(settings: AgentSettings) -> None:
+    """预载模型并按 keep_alive 驻留；只加载不生成，失败由调用方决定是否致命。"""
+
+    url = f"{settings.ollama_url}/api/generate"
+    body: dict[str, Any] = {"model": settings.model, "keep_alive": settings.keep_alive or "5m"}
+    try:
+        async with httpx.AsyncClient(timeout=settings.timeout) as client:
+            response = await client.post(url, json=body)
+    except httpx.HTTPError as exc:
+        raise OllamaError(f"连不上 Ollama（{settings.ollama_url}），模型预热失败") from exc
+    if response.status_code != 200:
+        raise OllamaError(f"模型预热失败：HTTP {response.status_code} {response.text[:200]}")
 
 
 def to_ollama_tool(tool: Any) -> dict[str, Any]:

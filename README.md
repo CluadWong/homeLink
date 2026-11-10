@@ -29,13 +29,15 @@ powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
 powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 ```
 
-安装后有两个任务：
+安装后有三个任务：
 
 | 任务 | 触发 | 行为 |
 | --- | --- | --- |
 | `HomeLinkService` | 开机（以 SYSTEM 运行，无需登录） | 后台静默执行 `scripts\service\run-service.cmd`，启动输出含访问地址，写 `logs\service.log` |
+| `HomeLinkAgent` | 开机（以 SYSTEM 运行） | 常驻 Agent 服务（`homelink-agentd`，127.0.0.1:8100），日志写 `logs\agent.log` |
 | `HomeLinkAddresses` | 用户登录 | 弹出终端执行 `scripts\service\show-addresses.cmd`，只显示当前访问地址，不重复启动服务 |
 
+- Agent 任务依赖 Ollama 已在运行；Ollama 未就绪时 daemon 会照常启动，首轮提问返回 503。
 - 安装脚本会**停用**旧项目的 `JJButlerService`（只停用不删除）；不想动旧任务时加 `-KeepOldService`。
 - 卸载后旧任务保持停用；需要恢复时执行 `uninstall-service.ps1 -RestoreOldService`。
 - 只想立刻看地址：运行 `scripts\service\show-addresses.cmd`（或 `python scripts\addresses.py`）。
@@ -74,6 +76,22 @@ python -m homelink_agent "卧室的风扇现在是什么状态？"
 python -m homelink_agent           # 交互模式
 ```
 
+### 常驻服务模式（推荐）
+
+`homelink-agentd` 把上面的一次性 CLI 变成常驻 HTTP 服务：MCP 子进程只起一次、模型以 `keep_alive` 驻留显存（启动时预热）、每个 `session_id` 独立保留历史与高风险确认状态。
+
+```powershell
+homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下文安装脚本
+```
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/chat` | `{"message": "...", "session_id": "..."}` → `{"reply", "session_id"}`；`session_id` 省略则新建 |
+| `GET /api/health` | 连接、模型、会话数 |
+| `DELETE /api/sessions/{id}` | 主动丢弃会话（含未完成的高风险确认） |
+
+掉线语义：MCP 掉线时该轮返回 502 并重置连接，**不自动重发**（避免红外重复发送）；Ollama 不可用返回 503。
+
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 地址 |
@@ -83,6 +101,10 @@ python -m homelink_agent           # 交互模式
 | `AGENT_MAX_STEPS` | `6` | 单轮最多几跳工具调用 |
 | `AGENT_AUDIT_PATH` | `logs/agent-audit.jsonl` | 审计日志路径；设为 `off` 关闭 |
 | `AGENT_DEBUG` | 未设置 | 设为 `1` 打印工具调用明细 |
+| `AGENT_KEEP_ALIVE` | `30m` | 模型驻留时长（透传 Ollama `keep_alive`） |
+| `AGENTD_HOST` / `AGENTD_PORT` | `127.0.0.1` / `8100` | daemon 监听地址 |
+| `AGENTD_SESSION_TTL` | `120`（分钟） | 会话闲置多久后淘汰 |
+| `AGENTD_MAX_SESSIONS` | `20` | 最多同时保留几个会话（LRU 淘汰） |
 
 审计日志逐行记录 `turn_start` / `tool_call` / `confirm_downgraded` / `turn_end` / `turn_error`，每条带时间戳与参数，用于回溯「谁在什么时候让 Agent 做了什么」。
 

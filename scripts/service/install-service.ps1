@@ -2,10 +2,11 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
 #
-# 做三件事：
+# 做四件事：
 #   1. 停用旧项目的计划任务 JJButlerService（只停用不删除；-KeepOldService 可跳过）；
 #   2. 注册 HomeLinkService：开机启动、后台静默，输出写 logs\service.log；
-#   3. 注册 HomeLinkAddresses：用户登录后弹出终端显示访问地址。
+#   3. 注册 HomeLinkAgent：开机常驻 Agent 服务（8100 端口），输出写 logs\agent.log；
+#   4. 注册 HomeLinkAddresses：用户登录后弹出终端显示访问地址。
 #
 # 卸载见 uninstall-service.ps1。日志写 logs\service-install.log。
 
@@ -25,6 +26,7 @@ Start-Transcript -Path (Join-Path $logsDir 'service-install.log') -Append | Out-
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 $oldTaskName = 'JJButlerService'
 $serviceTaskName = 'HomeLinkService'
+$agentTaskName = 'HomeLinkAgent'
 $addressTaskName = 'HomeLinkAddresses'
 
 function Assert-Admin {
@@ -78,9 +80,10 @@ try {
     Assert-Admin
 
     $runService = Join-Path $repoRoot 'scripts\service\run-service.cmd'
+    $runAgent = Join-Path $repoRoot 'scripts\service\run-agent.cmd'
     $showAddresses = Join-Path $repoRoot 'scripts\service\show-addresses.cmd'
     $python = Join-Path $repoRoot '.venv\Scripts\python.exe'
-    foreach ($required in @($runService, $showAddresses, $python)) {
+    foreach ($required in @($runService, $runAgent, $showAddresses, $python)) {
         if (-not (Test-Path $required)) { throw "缺少必需文件：$required" }
     }
 
@@ -104,7 +107,7 @@ try {
     }
 
     # 2) 清理上次安装可能残留的任务与进程（例如被旧编码脚本卡住的 cmd）
-    foreach ($name in @($serviceTaskName, $addressTaskName)) {
+    foreach ($name in @($serviceTaskName, $agentTaskName, $addressTaskName)) {
         $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -ne $existing) {
             Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -114,8 +117,11 @@ try {
     $stale = Get-CimInstance Win32_Process | Where-Object {
         $_.ProcessId -ne $PID -and $_.CommandLine -and (
             $_.CommandLine -like '*run-service.cmd*' -or
+            $_.CommandLine -like '*run-agent.cmd*' -or
             $_.CommandLine -like '*scripts\start.py*' -or
-            $_.CommandLine -like '*homelink.interface.api.app*'
+            $_.CommandLine -like '*homelink.interface.api.app*' -or
+            $_.CommandLine -like '*homelink_agent.daemon*' -or
+            $_.CommandLine -like '*homelink-agentd*'
         )
     }
     foreach ($proc in $stale) {
@@ -124,6 +130,8 @@ try {
     }
     $serviceLog = Join-Path $logsDir 'service.log'
     if (Test-Path $serviceLog) { Clear-Content -Path $serviceLog -ErrorAction SilentlyContinue }
+    $agentLog = Join-Path $logsDir 'agent.log'
+    if (Test-Path $agentLog) { Clear-Content -Path $agentLog -ErrorAction SilentlyContinue }
 
     # 3) 开机静默启动：SYSTEM 账号，不需要登录
     $serviceAction = New-ScheduledTaskAction -Execute $runService -WorkingDirectory $repoRoot
@@ -148,6 +156,30 @@ try {
         throw "任务 $serviceTaskName 注册失败（任务列表里找不到）。"
     }
     Write-Host "已注册 $serviceTaskName（开机启动，后台静默）。"
+
+    # 3.5) Agent 常驻服务：与主服务同款 SYSTEM 开机任务，监听 8100
+    $agentAction = New-ScheduledTaskAction -Execute $runAgent -WorkingDirectory $repoRoot
+    $agentTrigger = New-ScheduledTaskTrigger -AtStartup
+    $agentPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $agentSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask `
+        -TaskName $agentTaskName `
+        -Action $agentAction `
+        -Trigger $agentTrigger `
+        -Principal $agentPrincipal `
+        -Settings $agentSettings `
+        -Description 'HomeLink（重建版）：开机常驻 Agent 服务（8100），日志 logs\agent.log' `
+        -Force | Out-Null
+    if ($null -eq (Get-ScheduledTask -TaskName $agentTaskName -ErrorAction SilentlyContinue)) {
+        throw "任务 $agentTaskName 注册失败（任务列表里找不到）。"
+    }
+    Write-Host "已注册 $agentTaskName（开机常驻，8100 端口）。"
 
     # 4) 登录后显示地址：只读展示，不重复启动服务
     $addressAction = New-ScheduledTaskAction -Execute $showAddresses -WorkingDirectory $repoRoot
@@ -179,11 +211,18 @@ try {
         } else {
             Write-Host '警告：60 秒内没等到 8000 端口，请查看 logs\service.log。'
         }
+        Start-ScheduledTask -TaskName $agentTaskName
+        if (Wait-PortState -Port 8100 -TimeoutSeconds 30 -Listening $true) {
+            Write-Host 'Agent 常驻服务已在 8100 端口监听。'
+        } else {
+            Write-Host '警告：30 秒内没等到 8100 端口，请查看 logs\agent.log。'
+        }
     }
 
     Write-Host ''
     Write-Host '安装完成。'
     Write-Host "  服务日志：$logsDir\service.log"
+    Write-Host "  Agent 日志：$logsDir\agent.log"
     Write-Host "  地址查看：scripts\service\show-addresses.cmd"
     exit 0
 } catch {

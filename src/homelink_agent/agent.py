@@ -57,17 +57,7 @@ class HomeAgent:
         self._user_confirmed = False
 
     async def run(self, user_text: str, history: list[dict[str, str]] | None = None) -> str:
-        # 上一轮被拦下的设备只对这一轮有效，避免「下次随口说好」被当成授权。
-        previous_pending = self._pending_device
-        self._pending_device = None
-        self._user_confirmed = _looks_like_consent(user_text)
-        self._audit.write(
-            "turn_start", user=user_text, consent=self._user_confirmed, pending=previous_pending
-        )
-
-        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(history_messages(history or []))
-        messages.append({"role": "user", "content": user_text})
+        """一次性路径（CLI）：每次现起 MCP 子进程，用完即关。"""
 
         params = StdioServerParameters(
             command=sys.executable,
@@ -82,31 +72,57 @@ class HomeAgent:
                 ):
                     await session.initialize()
                     tools = [to_ollama_tool(tool) for tool in (await session.list_tools()).tools]
-
-                    for _ in range(self._settings.max_steps):
-                        message = await chat(self._settings, messages, tools)
-                        calls = message.get("tool_calls") or []
-                        if not calls:
-                            reply = (
-                                str(message.get("content") or "").strip() or "（模型没有返回内容）"
-                            )
-                            self._audit.write("turn_end", reply=reply)
-                            return reply
-
-                        messages.append(
-                            {
-                                "role": "assistant",
-                                "content": str(message.get("content") or ""),
-                                "tool_calls": calls,
-                            }
-                        )
-                        for call in calls:
-                            messages.append(await self._call_tool(session, call, previous_pending))
+                    return await self.respond(session, tools, user_text, history)
             except BaseExceptionGroup as group:
-                # anyio 任务组会把模型/网络异常包成 ExceptionGroup，剥出来再抛
+                # 起子进程阶段的 anyio 异常组；respond 内部的已在 respond 处理过
                 error = _unwrap(group)
                 self._audit.write("turn_error", error=str(error))
                 raise error from None
+
+    async def respond(
+        self,
+        session: ClientSession,
+        tools: list[dict[str, Any]],
+        user_text: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
+        """完整一轮对话：常驻服务与一次性路径共用；session 由调用方提供并保活。"""
+
+        # 上一轮被拦下的设备只对这一轮有效，避免「下次随口说好」被当成授权。
+        previous_pending = self._pending_device
+        self._pending_device = None
+        self._user_confirmed = _looks_like_consent(user_text)
+        self._audit.write(
+            "turn_start", user=user_text, consent=self._user_confirmed, pending=previous_pending
+        )
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(history_messages(history or []))
+        messages.append({"role": "user", "content": user_text})
+
+        try:
+            for _ in range(self._settings.max_steps):
+                message = await chat(self._settings, messages, tools)
+                calls = message.get("tool_calls") or []
+                if not calls:
+                    reply = str(message.get("content") or "").strip() or "（模型没有返回内容）"
+                    self._audit.write("turn_end", reply=reply)
+                    return reply
+
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": str(message.get("content") or ""),
+                        "tool_calls": calls,
+                    }
+                )
+                for call in calls:
+                    messages.append(await self._call_tool(session, call, previous_pending))
+        except BaseExceptionGroup as group:
+            # anyio 任务组会把模型/网络异常包成 ExceptionGroup，剥出来再抛
+            error = _unwrap(group)
+            self._audit.write("turn_error", error=str(error))
+            raise error from None
 
         reply = "（指令拆得太复杂，已到最大步数；请一次只做一件事）"
         self._audit.write("turn_end", reply=reply)

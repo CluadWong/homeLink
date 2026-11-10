@@ -36,6 +36,7 @@ dev = [
 [project.scripts]
 homelink-mcp = "homelink_mcp.server:main"
 homelink-agent = "homelink_agent.cli:main"
+homelink-agentd = "homelink_agent.daemon:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

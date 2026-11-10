@@ -11,6 +11,11 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_MAX_STEPS = 6
 DEFAULT_TIMEOUT = 120.0
 DEFAULT_AUDIT_PATH = "logs/agent-audit.jsonl"
+DEFAULT_KEEP_ALIVE = "30m"
+DEFAULT_DAEMON_HOST = "127.0.0.1"
+DEFAULT_DAEMON_PORT = 8100
+DEFAULT_SESSION_TTL_MIN = 120
+DEFAULT_MAX_SESSIONS = 20
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,11 @@ class AgentSettings:
     max_steps: int
     timeout: float
     audit_path: str
+    keep_alive: str
+    daemon_host: str
+    daemon_port: int
+    session_ttl_min: int
+    max_sessions: int
 
 
 def _positive_int(raw: str, fallback: int) -> int:
@@ -51,4 +61,11 @@ def load_settings() -> AgentSettings:
         max_steps=_positive_int(os.environ.get("AGENT_MAX_STEPS", ""), DEFAULT_MAX_STEPS),
         timeout=_positive_float(os.environ.get("AGENT_TIMEOUT", ""), DEFAULT_TIMEOUT),
         audit_path=(os.environ.get("AGENT_AUDIT_PATH") or DEFAULT_AUDIT_PATH).strip(),
+        keep_alive=(os.environ.get("AGENT_KEEP_ALIVE") or DEFAULT_KEEP_ALIVE).strip(),
+        daemon_host=(os.environ.get("AGENTD_HOST") or DEFAULT_DAEMON_HOST).strip(),
+        daemon_port=_positive_int(os.environ.get("AGENTD_PORT", ""), DEFAULT_DAEMON_PORT),
+        session_ttl_min=_positive_int(
+            os.environ.get("AGENTD_SESSION_TTL", ""), DEFAULT_SESSION_TTL_MIN
+        ),
+        max_sessions=_positive_int(os.environ.get("AGENTD_MAX_SESSIONS", ""), DEFAULT_MAX_SESSIONS),
     )
