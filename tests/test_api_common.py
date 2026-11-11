@@ -1,8 +1,10 @@
-"""通用契约：health、trace、鉴权、错误信封、请求校验。"""
+"""通用契约：health、metrics、trace、鉴权、错误信封、请求校验。"""
 
 from __future__ import annotations
 
 import re
+
+from homelink.interface.api.metrics import RequestMetrics
 
 
 def test_health(client):
@@ -13,6 +15,52 @@ def test_health(client):
     assert body["status"] == "ok"
     assert body["schema_version"] == 3
     assert body["trace_id"]
+
+
+def test_metrics_reports_health_calls_and_errors(client):
+    client.get("/api/rooms")
+    client.get("/api/devices/dev_missing")
+
+    response = client.get("/api/metrics")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["status"] == "ok"
+    assert body["schema_version"] == 3
+    assert body["gateway"] == {"mode": "mock", "base_url": ""}
+    assert body["requests"]["total"] == 2
+    assert body["requests"]["errors"] == 1
+    assert body["requests"]["error_rate"] == 0.5
+    assert body["requests"]["by_status"] == {"2xx": 1, "3xx": 0, "4xx": 1, "5xx": 0}
+    assert body["latency_ms"]["samples"] == 2
+    assert body["latency_ms"]["p50"] is not None
+    assert body["uptime_seconds"] >= 0
+    assert body["trace_id"]
+
+
+def test_metrics_does_not_count_itself(client):
+    client.get("/api/health")
+    first = client.get("/api/metrics").json()
+    second = client.get("/api/metrics").json()
+    assert first["requests"]["total"] == second["requests"]["total"] == 1
+
+
+def test_metrics_requires_token(client_factory):
+    client = client_factory("secret-token")
+    assert client.get("/api/metrics").status_code == 401
+
+
+def test_request_metrics_counts_5xx_and_percentiles():
+    metrics = RequestMetrics(clock=lambda: 100.0)
+    metrics.record(status_code=200, latency_ms=10)
+    metrics.record(status_code=503, latency_ms=30)
+
+    snapshot = metrics.snapshot()
+    assert snapshot["uptime_seconds"] == 0.0
+    assert snapshot["requests"]["total"] == 2
+    assert snapshot["requests"]["errors"] == 1
+    assert snapshot["requests"]["by_status"] == {"2xx": 1, "3xx": 0, "4xx": 0, "5xx": 1}
+    assert snapshot["latency_ms"] == {"p50": 10, "p95": 30, "samples": 2}
 
 
 def test_trace_generated(client):

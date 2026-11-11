@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`8f5a73e`，468 passed，schema v3
+> 当前基线：`8f5a73e`，472 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -33,10 +33,10 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `468 passed` |
+| pytest | `472 passed` |
 | ruff | `All checks passed` |
-| black | `117 files unchanged` |
-| mypy | `Success: no issues found in 117 source files` |
+| black | `118 files unchanged` |
+| mypy | `Success: no issues found in 118 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -173,10 +173,12 @@
   - 内容：130 条云端评测定期跑（发版前或每周）
   - 验收：`docs/eval-report.md` 有模型、日期、指标与失败明细
 
-- [ ] **D4 后端可观测性补齐**
-  - 现状：daemon 有 `/api/metrics`，后端没有
-  - 动作：后端指标或健康聚合接口
-  - 验收：能回答「后端是否健康、调用量、错误率」
+- [x] **D4 后端可观测性补齐**
+  - 完成：2026-11-11
+  - 实现：新增 `src/homelink/interface/api/metrics.py`（线程安全进程内计数，错误含 4xx+5xx，耗时保留最近 1000 样本）；`app.py` 的 trace 中间件顺带记录 `/api/*`（不记 `/api/metrics` 自身），未处理异常按 500 计数
+  - 接口：`GET /api/metrics`（受 Bearer 鉴权）返回 `status`、`schema_version`、`gateway.mode/base_url`、`uptime_seconds`、`requests{total,errors,error_rate,by_status}`、`latency_ms{p50,p95,samples}`；不探测网关，无网络副作用
+  - 测试：`tests/test_api_common.py` 新增 4 条（健康+调用量+错误率、自身不计数、token 鉴权、5xx 与分位）；全量 472 passed
+  - 文档：`api-contract.md` §2.1、`architecture.md`、`docs/README.md`、`roadmap.md`、`acceptance-checklist.md` 端点口径统一为 38（22 传统 + 16 Agent）/ 29 条路径
 
 - [ ] **D5 性能与容量基线**
   - 内容：场景 20 目标、`runs` limit、DB 增长、daemon 并发
@@ -306,6 +308,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 C3（时区口径写入 README + 边界测试）、C4（daemon 单实例文件锁，基线 444 passed） |
 | 2026-11-11 | 完成 C6（`command_requests` 保留期 180 天）、C7（审计隐私与保留说明，基线 445 passed） |
 | 2026-11-11 | 完成 D2（cron 属性测试：随机表达式与参考实现比对 + 整周扫描，基线 468 passed） |
+| 2026-11-11 | 完成 D4（后端 `/api/metrics`：健康、调用量、错误率、P50/P95；端点口径 38 / 29 路径，基线 472 passed） |
 
 ---
 

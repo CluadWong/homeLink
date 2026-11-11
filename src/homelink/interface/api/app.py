@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -20,6 +21,7 @@ from homelink.bootstrap.context import AppContext, build_context
 from homelink.core.config import ConfigError
 from homelink.core.errors import AppError, ErrorCode
 from homelink.interface.api.errors import register_exception_handlers
+from homelink.interface.api.metrics import RequestMetrics
 from homelink.interface.api.routers import (
     agent,
     audit,
@@ -37,11 +39,20 @@ logger = logging.getLogger(__name__)
 
 TRACE_HEADER = "X-Trace-Id"
 _TRACE_MAX_LENGTH = 64
+_METRICS_PATH = "/api/metrics"
+
+
+def _should_count(path: str) -> bool:
+    """只统计 `/api/*`；`/api/metrics` 自身不计，避免读一次涨一次。"""
+
+    return path.startswith("/api/") and path != _METRICS_PATH
 
 
 def create_app(context: AppContext) -> FastAPI:
     app = FastAPI(title="HomeLink", version="0.1.0")
     app.state.context = context
+    app.state.metrics = RequestMetrics(clock=time.perf_counter)
+    metrics = app.state.metrics
 
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -49,7 +60,19 @@ def create_app(context: AppContext) -> FastAPI:
         if not trace_id or len(trace_id) > _TRACE_MAX_LENGTH:
             trace_id = secrets.token_hex(4)
         request.state.trace_id = trace_id
-        response = await call_next(request)
+        counted = _should_count(request.url.path)
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            if counted:  # 未处理异常由外层兜底返回 500，这里先记上
+                metrics.record(status_code=500, latency_ms=(time.perf_counter() - started) * 1000)
+            raise
+        if counted:
+            metrics.record(
+                status_code=response.status_code,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
         response.headers[TRACE_HEADER] = trace_id
         return response
 

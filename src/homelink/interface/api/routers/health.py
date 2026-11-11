@@ -1,4 +1,4 @@
-"""健康检查（文档未定义响应形状，见交付说明）。"""
+"""健康检查与进程内指标。"""
 
 from __future__ import annotations
 
@@ -16,5 +16,27 @@ def health(request: Request) -> dict:
         "success": True,
         "status": "ok",
         "schema_version": SCHEMA_VERSION,
+        "trace_id": request.state.trace_id,
+    }
+
+
+@router.get("/metrics")
+def metrics(request: Request) -> dict:
+    """后端健康 + 调用量 + 错误率 + 最近耗时，用于运维自检。
+
+    进程内计数，重启清零；只统计 `/api/*`，本端点自身不计。
+    """
+
+    context = request.app.state.context
+    snapshot = request.app.state.metrics.snapshot()
+    return {
+        "success": True,
+        "status": "ok",
+        "schema_version": SCHEMA_VERSION,
+        "gateway": {
+            "mode": context.config.settings.gateway.mode,
+            "base_url": context.config.settings.gateway.base_url,
+        },
+        **snapshot,
         "trace_id": request.state.trace_id,
     }

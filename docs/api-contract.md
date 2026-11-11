@@ -59,12 +59,16 @@
 - 开启但缺 `dist/index.html`：启动日志打 WARNING，非 API 路径返回 **503 纯文本**「前端未构建…请先 `npm run build`」，`/api` 不受影响（**不是 500**）。
 - 生产**不使用 Vite dev server**：页面与 API 同源同端口，构建产物由后端直接提供；静态页面与 `/docs` 不受 token 约束。
 
-## 2. 端点清单（37 个）
+## 2. 端点清单（38 个）
 
-### 2.1 健康检查
+### 2.1 健康检查与指标
 
 **`GET /api/health`** — 存活探针，恒 200；同样受 Bearer 鉴权约束。
 成功：`{success:true,status:"ok",schema_version:3,trace_id}`。无请求参数、无副作用；`schema_version` 与 `SCHEMA_VERSION` 同值。
+
+**`GET /api/metrics`** — 后端健康、调用量、错误率与最近耗时；同样受 Bearer 鉴权约束。
+成功：`{success,status:"ok",schema_version,gateway:{mode,base_url},uptime_seconds,requests:{total,errors,error_rate,by_status:{2xx,3xx,4xx,5xx}},latency_ms:{p50,p95,samples},trace_id}`。
+只统计 `/api/*` 请求，本端点自身不计数；`errors` 含 4xx 与 5xx；计数在进程内，重启清零；不读网关（只回配置里的 `mode` / `base_url`），因此无网络副作用。
 
 ### 2.2 状态
 
