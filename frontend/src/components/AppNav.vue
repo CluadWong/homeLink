@@ -10,6 +10,7 @@ const pages = [
   { index: '04', path: '/state', label: '状态' },
   { index: '05', path: '/correct', label: '校正' },
   { index: '06', path: '/audit', label: '审计' },
+  { index: '07', path: '/scenes', label: '场景' },
 ]
 
 const settingsOpen = ref(false)

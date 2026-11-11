@@ -5,6 +5,7 @@ import CallView from '../views/CallView.vue'
 import CorrectView from '../views/CorrectView.vue'
 import DevicesView from '../views/DevicesView.vue'
 import LearnView from '../views/LearnView.vue'
+import ScenesView from '../views/ScenesView.vue'
 import StateView from '../views/StateView.vue'
 
 const router = createRouter({
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/state', name: 'state', component: StateView, meta: { title: '状态' } },
     { path: '/correct', name: 'correct', component: CorrectView, meta: { title: '校正' } },
     { path: '/audit', name: 'audit', component: AuditView, meta: { title: '审计' } },
+    { path: '/scenes', name: 'scenes', component: ScenesView, meta: { title: '场景' } },
     { path: '/:pathMatch(.*)*', redirect: '/call' },
   ],
   scrollBehavior: () => ({ top: 0 }),

@@ -6,6 +6,7 @@ import {
 } from './errors'
 import type {
   AppState,
+  CapabilityListPayload,
   CaptureResult,
   ControlResult,
   CorrectResult,
@@ -17,6 +18,11 @@ import type {
   ListDevicesPayload,
   ListRoomsPayload,
   Room,
+  SceneActionGroupInput,
+  SceneListPayload,
+  ScenePayload,
+  SceneRunPayload,
+  SceneTriggerInput,
 } from './types'
 
 const TOKEN_KEY = 'homelink_api_token'
@@ -248,6 +254,49 @@ export function correct(body: {
   reason?: string
 }): Promise<{ success: true } & CorrectResult> {
   return request('POST', '/api/correct', { body })
+}
+
+// ---------------------------------------------------------------- 场景（Agent 契约，结果在 result 里）
+
+export function fetchScenes(): Promise<SceneListPayload> {
+  return request<SceneListPayload>('GET', '/api/agent/scenes')
+}
+
+export function fetchCapabilities(): Promise<CapabilityListPayload> {
+  return request<CapabilityListPayload>('GET', '/api/agent/capabilities')
+}
+
+export function createScene(body: {
+  name: string
+  enabled: boolean
+  action_groups: SceneActionGroupInput[]
+  triggers: SceneTriggerInput[]
+}): Promise<ScenePayload> {
+  return request<ScenePayload>('POST', '/api/agent/scenes', { body })
+}
+
+export function patchScene(
+  sceneId: string,
+  body: {
+    name?: string
+    enabled?: boolean
+    action_groups?: SceneActionGroupInput[]
+    triggers?: SceneTriggerInput[]
+  },
+): Promise<ScenePayload> {
+  return request<ScenePayload>('PATCH', `/api/agent/scenes/${encodeURIComponent(sceneId)}`, {
+    body,
+  })
+}
+
+export function deleteScene(sceneId: string): Promise<Record<string, unknown>> {
+  return request('DELETE', `/api/agent/scenes/${encodeURIComponent(sceneId)}`)
+}
+
+export function runScene(sceneId: string, confirm: boolean): Promise<SceneRunPayload> {
+  return request<SceneRunPayload>('POST', `/api/agent/scenes/${encodeURIComponent(sceneId)}/run`, {
+    body: { confirm },
+  })
 }
 
 // ---------------------------------------------------------------- 学码

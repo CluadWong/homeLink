@@ -119,3 +119,112 @@ export interface ListAuditPayload {
   records: AuditRecord[]
   trace_id: string
 }
+
+// ---------------------------------------------------------------- Agent 场景
+
+export type SceneTriggerType = 'manual' | 'schedule' | 'voice' | 'device_state'
+
+export interface SceneTarget {
+  device_id: string
+  device_name: string
+  room: string
+  function_id: string | null
+  command: string
+}
+
+export interface SceneActionGroup {
+  group_id: string
+  name: string
+  capability: string
+  targets: SceneTarget[]
+}
+
+export interface SceneTrigger {
+  trigger_id: string
+  type: SceneTriggerType
+  enabled: boolean
+  config: Record<string, unknown>
+}
+
+export interface Scene {
+  scene_id: string
+  name: string
+  enabled: boolean
+  action_groups: SceneActionGroup[]
+  triggers: SceneTrigger[]
+  items: Array<{ device_id: string; function_id: string | null; command: string }>
+  contains_high_risk: boolean
+  risk_level: 'low' | 'high'
+  created_at: string
+  updated_at: string
+}
+
+export interface CapabilityDevice {
+  device_id: string
+  name: string
+  room: string
+  function_id: string
+}
+
+export interface Capability {
+  capability: string
+  device_count: number
+  devices: CapabilityDevice[]
+}
+
+export type SceneRunStatus = 'sent' | 'failed' | 'offline'
+
+export interface SceneRunItemResult {
+  group_id: string
+  capability: string
+  device_id: string
+  device_name: string
+  command: string
+  status: SceneRunStatus
+  request_id?: string
+  error_code?: string
+  message: string
+}
+
+export interface SceneRunResult {
+  scene_id: string
+  status: 'sent' | 'partial' | 'failed'
+  results: SceneRunItemResult[]
+  summary: { total: number; sent: number; failed: number; offline: number }
+}
+
+export interface SceneListPayload {
+  success: true
+  result: { count: number; scenes: Scene[] }
+  trace_id: string
+}
+
+export interface ScenePayload {
+  success: true
+  result: Scene
+  trace_id: string
+}
+
+export interface SceneRunPayload {
+  success: true
+  result: SceneRunResult
+  trace_id: string
+}
+
+export interface CapabilityListPayload {
+  success: true
+  result: { count: number; capabilities: Capability[] }
+  trace_id: string
+}
+
+export interface SceneActionGroupInput {
+  name: string
+  capability: string
+  targets: Array<{ device_id: string }>
+}
+
+export interface SceneTriggerInput {
+  type: SceneTriggerType
+  enabled: boolean
+  config: Record<string, unknown>
+}
