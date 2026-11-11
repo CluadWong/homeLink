@@ -14,7 +14,17 @@ from typing import Any
 CONTROL_TOOLS = frozenset({"home_control_device", "home_run_scene"})
 # agent.py 给失败的工具结果加这个前缀，用它区分「真发出去了」与「被拦下/报错」
 _ERROR_PREFIX = "工具执行失败："
-_ASK_BACK_MARKERS = ("？", "?", "请确认", "确认一下", "需要确认")
+_ASK_BACK_MARKERS = (
+    "？",
+    "?",
+    "请确认",
+    "确认一下",
+    "需要确认",
+    "请回复",
+    "请明确回复",
+    "请指定",
+    "请告诉我",
+)
 
 
 def _tuple_of_str(raw: Any) -> tuple[str, ...]:
