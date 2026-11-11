@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`7a937da`，472 passed，schema v3
+> 当前基线：`a49f5ca`，472 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -187,6 +187,7 @@
   - 结果（Windows 10 / Python 3.12.10，本机 SSD）：读接口 P95 2.9–16.3 ms；`runs?limit=50` P95 23.8 ms；场景 20 动作 P50 616.7 ms / P95 1366.0 ms，60 次全 `sent`；DB 增长约 10.6 KB/场景、543 B/动作
   - 容量上限：场景 items 1–20、动作组目标 1–20、`runs` limit 1–50、审计 limit 1–200；daemon 对话并发 1（热态两次并发墙钟 9.37 s，分别完成于 3.97 s / 9.37 s）
   - 文档：[performance.md](./performance.md)（口径、阈值建议、复现命令）；`docs/README.md` 与根 `README.md` 索引已加
+  - 提交：`a49f5ca`
 
 ---
 ## E. 交付形态（P2）
