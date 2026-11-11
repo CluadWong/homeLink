@@ -189,6 +189,16 @@ def run_scene(request: Request, scene_id: str, payload: AgentSceneRunRequest | N
     return _envelope(request, result)
 
 
+@router.get("/scenes/{scene_id}/runs")
+def list_scene_runs(request: Request, scene_id: str, limit: int = 10) -> dict:
+    """场景最近执行记录：只读，按一次执行（trace_id）聚合。"""
+
+    if not 1 <= limit <= 50:
+        raise AppError(ErrorCode.INVALID_REQUEST, "limit 需在 1–50 之间")
+    context = request.app.state.context
+    return _envelope(request, context.agent.scene_runs(scene_id, limit=limit))
+
+
 @router.post("/automations")
 def create_automation(request: Request) -> dict:
     raise AppError(

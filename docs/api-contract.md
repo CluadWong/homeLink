@@ -160,6 +160,7 @@
 | 更新场景 | `PATCH /api/agent/scenes/{scene_id}` |
 | 删除场景 | `DELETE /api/agent/scenes/{scene_id}` |
 | 跑场景 | `POST /api/agent/scenes/{scene_id}/run`（可选 body `{confirm}`） |
+| 场景执行记录 | `GET /api/agent/scenes/{scene_id}/runs?limit=` |
 | 设备元数据 | `PUT /api/agent/devices/{device_id}/metadata` |
 | 自动化（未支持） | `POST /api/agent/automations` → 501 |
 
@@ -182,6 +183,7 @@
 - 逐设备结果 `{group_id, capability, device_id, device_name, command, status, request_id|error_code, message}`，`status` 为 `sent` / `failed` / `offline`（设备失去能力为 `failed` + `NOT_SUPPORTED`）；整体 `status` 为 `sent / partial / failed`；`summary` 给出 `{total, sent, failed, offline}`。
 - **能力目录** `GET /api/agent/capabilities` → `{count, capabilities:[{capability, device_count, devices:[{device_id, name, room, function_id}]}]}`，供场景编辑时过滤出支持该能力的设备。
 - 跑场景接受可选 body `{confirm: false}`：无 body 按 `confirm=false` 处理，未声明字段 400 `INVALID_REQUEST`。`contains_high_risk=true` 的场景未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`，且不产生任何 `command_requests` 记录；确认后逐 target 发送，每个 target 只产生一条记录。
+- **场景执行记录** `GET /api/agent/scenes/{scene_id}/runs?limit=` → `{scene_id, runs:[{trace_id, started_at, status, summary:{total, sent, failed}, results:[{device_id, command, status, error_code, error_message}]}]}`，只读。`limit` 1–50，默认 10，越界 400；场景不存在 404。同一次执行的目标共享 `trace_id`，据此聚合并按最新在前排序；`status` 同样是 `sent / partial / failed`。记录直接来自 `command_requests`，未真正下发（离线 / 缺少能力）的 target 不会出现，因此 `total` 可能小于场景目标数。
 - 自动化规则本期不实现，固定 501 `NOT_SUPPORTED`。
 
 ## 3. 学码契约

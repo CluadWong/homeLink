@@ -328,6 +328,42 @@ class AgentService:
             "summary": {"total": len(results), **counters},
         }
 
+    def scene_runs(self, scene_id: str, *, limit: int = 10) -> dict[str, Any]:
+        """场景最近执行记录：只读 `command_requests`，按 `trace_id` 聚合一次执行。
+
+        只包含真正下发过的设备：离线或缺少能力的 target 不会产生记录。
+        """
+
+        self._scenes.get(scene_id)
+        runs: list[dict[str, Any]] = []
+        for group in self._commands.list_scene_runs(scene_id, limit=limit):
+            results = [
+                {
+                    "device_id": record["device_id"],
+                    "command": record["command"],
+                    "status": record["status"],
+                    "error_code": record["error_code"],
+                    "error_message": record["error_message"],
+                }
+                for record in group["records"]
+            ]
+            sent = sum(1 for item in results if item["status"] == "sent")
+            overall = "sent" if sent == len(results) else ("failed" if sent == 0 else "partial")
+            runs.append(
+                {
+                    "trace_id": group["trace_id"],
+                    "started_at": group["started_at"],
+                    "status": overall,
+                    "summary": {
+                        "total": len(results),
+                        "sent": sent,
+                        "failed": len(results) - sent,
+                    },
+                    "results": results,
+                }
+            )
+        return {"scene_id": scene_id, "runs": runs}
+
     def _run_target(
         self,
         *,

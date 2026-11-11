@@ -6,6 +6,7 @@ import {
   createScene,
   deleteScene,
   fetchCapabilities,
+  fetchSceneRuns,
   fetchScenes,
   patchScene,
   runScene,
@@ -14,6 +15,7 @@ import { toApiError, type ApiError } from '../api/errors'
 import type {
   Capability,
   Scene,
+  SceneRunRecord,
   SceneRunResult,
   SceneTrigger,
   SceneTriggerInput,
@@ -56,6 +58,11 @@ const runResult = ref<SceneRunResult | null>(null)
 const runSceneName = ref('')
 const runningId = ref<string | null>(null)
 
+// 最近执行记录：只读辅助信息，加载失败不阻塞场景列表。
+const runsByScene = ref<Record<string, SceneRunRecord[]>>({})
+const historyOpen = ref(false)
+const historySceneId = ref<string | null>(null)
+
 const capabilityMap = computed(() => {
   const map = new Map<string, Capability>()
   for (const item of capabilities.value) map.set(item.capability, item)
@@ -76,6 +83,72 @@ const overallLabel: Record<string, string> = {
   sent: '全部已发送',
   partial: '部分成功',
   failed: '全部失败',
+}
+
+const historyScene = computed(
+  () => scenes.value.find((scene) => scene.scene_id === historySceneId.value) ?? null,
+)
+
+const historyRuns = computed(() =>
+  historySceneId.value ? runsByScene.value[historySceneId.value] ?? [] : [],
+)
+
+function formatRunTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function lastRun(scene: Scene): SceneRunRecord | undefined {
+  return runsByScene.value[scene.scene_id]?.[0]
+}
+
+function lastRunLabel(scene: Scene): string {
+  const run = lastRun(scene)
+  if (!run) return '还没有执行记录'
+  const label = overallLabel[run.status] ?? run.status
+  return `${formatRunTime(run.started_at)} · ${label}`
+}
+
+function lastRunStatus(scene: Scene): string {
+  return lastRun(scene)?.status ?? 'none'
+}
+
+function deviceName(deviceId: string): string {
+  for (const group of historyScene.value?.action_groups ?? []) {
+    const target = group.targets.find((item) => item.device_id === deviceId)
+    if (target) return target.device_name
+  }
+  return deviceId
+}
+
+function openHistory(scene: Scene): void {
+  historySceneId.value = scene.scene_id
+  historyOpen.value = true
+}
+
+async function loadRuns(sceneId?: string): Promise<void> {
+  const targets = sceneId
+    ? scenes.value.filter((scene) => scene.scene_id === sceneId)
+    : scenes.value
+  const entries = await Promise.all(
+    targets.map(async (scene) => {
+      try {
+        const payload = await fetchSceneRuns(scene.scene_id, 5)
+        return [scene.scene_id, payload.result.runs] as const
+      } catch {
+        return [scene.scene_id, [] as SceneRunRecord[]] as const
+      }
+    }),
+  )
+  const next = { ...runsByScene.value }
+  for (const [id, runs] of entries) next[id] = runs as SceneRunRecord[]
+  runsByScene.value = next
 }
 
 function groupDevices(group: DraftGroup) {
@@ -111,6 +184,7 @@ async function load(): Promise<void> {
     ])
     scenes.value = scenePayload.result.scenes
     capabilities.value = capabilityPayload.result.capabilities
+    await loadRuns()
   } catch (error) {
     loadError.value = toApiError(error)
   } finally {
@@ -357,6 +431,7 @@ async function execute(scene: Scene): Promise<void> {
     runResult.value = payload.result
     runSceneName.value = scene.name
     runSheetOpen.value = true
+    void loadRuns(scene.scene_id)
   } catch (error) {
     actionError.value = toApiError(error)
   } finally {
@@ -432,6 +507,13 @@ onMounted(load)
             {{ triggerLabel(trigger) }}{{ trigger.enabled ? '' : '（停用）' }}
           </span>
         </p>
+
+        <button class="run-history-trigger" type="button" @click="openHistory(scene)">
+          <span class="run-history-label">最近执行</span>
+          <span class="run-history-meta" :class="`is-${lastRunStatus(scene)}`">
+            {{ lastRunLabel(scene) }}
+          </span>
+        </button>
 
         <div class="row-actions">
           <button
@@ -644,6 +726,47 @@ onMounted(load)
           </ul>
           <p class="sheet-note">已发出的信号不会因其他设备失败而撤销或重发。</p>
         </template>
+      </div>
+    </van-popup>
+
+    <!-- 最近执行记录：只读，按一次执行聚合 -->
+    <van-popup v-model:show="historyOpen" position="bottom" round>
+      <div class="sheet-body">
+        <header class="sheet-head">
+          <h3>执行记录 · {{ historyScene?.name ?? '' }}</h3>
+          <button class="text-btn" type="button" @click="historyOpen = false">关闭</button>
+        </header>
+
+        <EmptyBlock
+          v-if="historyRuns.length === 0"
+          title="还没有执行记录"
+          note="手动执行或定时触发后，这里会显示每次实际下发的设备结果。"
+        />
+
+        <div v-for="run in historyRuns" :key="run.trace_id" class="run-record">
+          <p class="run-summary">
+            {{ formatRunTime(run.started_at) }} · {{ overallLabel[run.status] ?? run.status }} ·
+            成功 {{ run.summary.sent }} / 失败 {{ run.summary.failed }}
+          </p>
+          <ul class="run-list">
+            <li
+              v-for="item in run.results"
+              :key="`${run.trace_id}-${item.device_id}-${item.command}`"
+              class="run-row"
+            >
+              <div class="run-main">
+                <strong>{{ deviceName(item.device_id) }}</strong>
+                <span class="run-capability">{{ item.command }}</span>
+              </div>
+              <span class="run-status" :class="`is-${item.status}`">
+                {{ runStatusLabel[item.status] ?? item.status }}
+              </span>
+              <p v-if="item.error_message" class="run-message">{{ item.error_message }}</p>
+            </li>
+          </ul>
+        </div>
+
+        <p class="sheet-note">记录只来自实际下发的请求；离线或缺少能力的设备不会出现在这里。</p>
       </div>
     </van-popup>
   </section>

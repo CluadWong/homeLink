@@ -211,6 +211,29 @@ export interface SceneRunPayload {
   trace_id: string
 }
 
+/** 一次历史执行的单设备记录（只含真正下发过的设备）。 */
+export interface SceneRunRecordItem {
+  device_id: string
+  command: string
+  status: SceneRunStatus
+  error_code: string | null
+  error_message: string | null
+}
+
+export interface SceneRunRecord {
+  trace_id: string
+  started_at: string
+  status: 'sent' | 'partial' | 'failed'
+  summary: { total: number; sent: number; failed: number }
+  results: SceneRunRecordItem[]
+}
+
+export interface SceneRunsPayload {
+  success: true
+  result: { scene_id: string; runs: SceneRunRecord[] }
+  trace_id: string
+}
+
 export interface CapabilityListPayload {
   success: true
   result: { count: number; capabilities: Capability[] }

@@ -609,6 +609,23 @@ jobs:
 - 测试：`tests/test_scheduler.py`（旧库迁移、增删改、保留 last_run、间隔与未配置来源）、
   `tests/test_daemon.py`（scene_id 匹配、触发器过滤、启动同步落到 `/api/schedules`）
 
+**场景最近执行记录（2026-11-11，MVP 口径）**：
+
+- 不新增子系统、不改执行语义：直接读已有 `command_requests`，`request_id`
+  以 `scene-` 开头的行按 `trace_id`（同一次执行共享）聚合
+- `CommandRequestStore.list_scene_runs(scene_id, limit)`：两段查询先取最近
+  `limit` 个 `trace_id`，再取对应明细；`request_id` 用 `GLOB` 匹配，
+  避免 LIKE 把场景 id 里的 `_` 当单字符通配符
+- `GET /api/agent/scenes/{scene_id}/runs?limit=`（1–50，默认 10）：返回
+  `{scene_id, runs:[{trace_id, started_at, status, summary, results}]}`，
+  只读；场景不存在 404，limit 越界 400
+- 记录只包含真正下发的设备；离线 / 缺少能力的 target 不产生行，
+  因此 `total` 可能小于场景目标数，接口与页面均按此说明
+- 场景页每张卡片显示「最近执行 · 时间 · 结果」，点开只读弹层看每次执行的设备明细；
+  执行成功后自动刷新
+- 语音入口仍按 MVP 冻结（P4），本轮不做
+- 测试：`tests/test_agent_api.py`（按 trace 聚合、跨场景与普通控制隔离、limit、404）
+
 ---
 
 ## 7. P4：可选能力

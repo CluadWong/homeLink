@@ -544,3 +544,118 @@ def test_scene_run_reports_offline_per_device_without_rollback(client, context, 
     assert statuses == {first_id: "offline", second_id: "sent"}
     # 尽力而为：离线设备失败，另一台照常执行并写入发送记录。
     assert _command_count(context) == 2
+
+
+def _insert_command(
+    context,
+    *,
+    request_id: str,
+    device_id: str,
+    trace_id: str,
+    created_at: str,
+    status: str = "sent",
+) -> None:
+    with context.db.transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO command_requests(
+                request_id, device_id, function_id, command, parameters, actor,
+                status, error_code, error_message, trace_id, created_at, updated_at
+            ) VALUES (?, ?, 'fn_manual', '关机', '{}', 'user', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request_id,
+                device_id,
+                status,
+                "DEVICE_OFFLINE" if status == "failed" else None,
+                "网关当前不可达" if status == "failed" else None,
+                trace_id,
+                created_at,
+                created_at,
+            ),
+        )
+
+
+def test_scene_runs_group_by_trace_and_are_scoped_to_scene(client, context):
+    first_id, _ = _make_device(context, client, name="客厅空调")
+    second_id, _ = _make_device(context, client, name="卧室空调")
+    scene_id = client.post(
+        "/api/agent/scenes",
+        json={
+            "name": "离家",
+            "action_groups": [
+                {
+                    "capability": "关机",
+                    "targets": [{"device_id": first_id}, {"device_id": second_id}],
+                }
+            ],
+        },
+    ).json()["result"]["scene_id"]
+
+    client.post(f"/api/agent/scenes/{scene_id}/run")
+
+    runs = client.get(f"/api/agent/scenes/{scene_id}/runs").json()["result"]["runs"]
+    assert len(runs) == 1
+    assert runs[0]["status"] == "sent"
+    assert runs[0]["summary"] == {"total": 2, "sent": 2, "failed": 0}
+    assert {item["device_id"] for item in runs[0]["results"]} == {first_id, second_id}
+    assert all(item["command"] == "关机" for item in runs[0]["results"])
+    latest_trace = runs[0]["trace_id"]
+
+    # 更早的一次全失败执行：同一场景的历史记录按最新在前追加。
+    _insert_command(
+        context,
+        request_id=f"scene-{scene_id}-0-old0",
+        device_id=first_id,
+        trace_id="trace-old",
+        created_at="2020-01-01T00:00:00Z",
+        status="failed",
+    )
+    # 只有 `_` 位置不同的另一个场景 id，不能被 LIKE 当成通配符匹配进来。
+    foreign_scene_id = "scX" + scene_id[3:]
+    _insert_command(
+        context,
+        request_id=f"scene-{foreign_scene_id}-0-aaaa",
+        device_id=first_id,
+        trace_id="trace-foreign",
+        created_at="2099-01-01T00:00:00Z",
+    )
+    # 普通控制的 request_id 不参与场景记录。
+    _insert_command(
+        context,
+        request_id="req-manual",
+        device_id=first_id,
+        trace_id="trace-manual",
+        created_at="2099-01-01T00:00:00Z",
+    )
+
+    runs = client.get(f"/api/agent/scenes/{scene_id}/runs").json()["result"]["runs"]
+    assert [run["trace_id"] for run in runs] == [latest_trace, "trace-old"]
+    assert runs[1]["status"] == "failed"
+    assert runs[1]["summary"] == {"total": 1, "sent": 0, "failed": 1}
+    assert runs[1]["results"][0]["error_code"] == "DEVICE_OFFLINE"
+
+    limited = client.get(f"/api/agent/scenes/{scene_id}/runs", params={"limit": 1}).json()[
+        "result"
+    ]["runs"]
+    assert len(limited) == 1
+    assert limited[0]["trace_id"] == latest_trace
+
+
+def test_scene_runs_validates_limit_and_scene(client, context):
+    device_id, _ = _make_device(context, client)
+    scene_id = client.post(
+        "/api/agent/scenes",
+        json={"name": "离家", "items": [{"device_id": device_id, "command": "关机"}]},
+    ).json()["result"]["scene_id"]
+
+    empty = client.get(f"/api/agent/scenes/{scene_id}/runs").json()["result"]["runs"]
+    assert empty == []
+
+    for bad_limit in (0, 51):
+        response = client.get(f"/api/agent/scenes/{scene_id}/runs", params={"limit": bad_limit})
+        assert response.status_code == 400
+        assert response.json()["error"] == "INVALID_REQUEST"
+
+    missing = client.get("/api/agent/scenes/sc_missing/runs")
+    assert missing.status_code == 404

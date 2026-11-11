@@ -82,6 +82,47 @@ class CommandRequestStore:
                 (status, error_code, error_message, utc_now_iso(), request_id),
             )
 
+    def list_scene_runs(self, scene_id: str, *, limit: int) -> list[dict[str, Any]]:
+        """场景最近若干次执行，一次执行（同一 `trace_id`）一组，最新的在前。
+
+        场景 id 形如 `sc_xxxxxx`、`request_id` 形如 `scene-sc_xxxxxx-0-abcd1234`，
+        因此用 GLOB 而不是 LIKE：`_` 在 LIKE 里是单字符通配符。
+        """
+
+        pattern = f"scene-{scene_id}-*"
+        with self._db.reader() as conn:
+            trace_rows = conn.execute(
+                """
+                SELECT trace_id, MIN(created_at) AS started_at
+                FROM command_requests
+                WHERE request_id GLOB ?
+                GROUP BY trace_id
+                ORDER BY started_at DESC, trace_id DESC
+                LIMIT ?
+                """,
+                (pattern, limit),
+            ).fetchall()
+            if not trace_rows:
+                return []
+            placeholders = ", ".join("?" for _ in trace_rows)
+            rows = conn.execute(
+                f"SELECT * FROM command_requests WHERE trace_id IN ({placeholders})"
+                " AND request_id GLOB ? ORDER BY created_at, request_id",
+                (*[row["trace_id"] for row in trace_rows], pattern),
+            ).fetchall()
+
+        grouped: dict[str, list[dict[str, Any]]] = {row["trace_id"]: [] for row in trace_rows}
+        for row in rows:
+            grouped[row["trace_id"]].append(dict(row))
+        return [
+            {
+                "trace_id": row["trace_id"],
+                "started_at": row["started_at"],
+                "records": grouped[row["trace_id"]],
+            }
+            for row in trace_rows
+        ]
+
 
 class SceneStore:
     """场景是编排层：动作组只声明能力，目标设备在运行时逐台解析能力。

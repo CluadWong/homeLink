@@ -22,6 +22,7 @@ import type {
   SceneListPayload,
   ScenePayload,
   SceneRunPayload,
+  SceneRunsPayload,
   SceneTriggerInput,
 } from './types'
 
@@ -297,6 +298,14 @@ export function runScene(sceneId: string, confirm: boolean): Promise<SceneRunPay
   return request<SceneRunPayload>('POST', `/api/agent/scenes/${encodeURIComponent(sceneId)}/run`, {
     body: { confirm },
   })
+}
+
+export function fetchSceneRuns(sceneId: string, limit = 5): Promise<SceneRunsPayload> {
+  return request<SceneRunsPayload>(
+    'GET',
+    `/api/agent/scenes/${encodeURIComponent(sceneId)}/runs`,
+    { params: { limit } },
+  )
 }
 
 // ---------------------------------------------------------------- 学码
