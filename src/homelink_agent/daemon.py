@@ -32,6 +32,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -44,6 +45,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from homelink_agent.agent import HomeAgent
 from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings, load_settings
+from homelink_agent.instance_lock import InstanceLock
 from homelink_agent.llm import OllamaError, to_ollama_tool, warm_model
 from homelink_agent.scheduler import (
     LoadScenePlans,
@@ -530,7 +532,17 @@ def main() -> None:
 
     import uvicorn
 
-    uvicorn.run(create_agent_app(settings), host=args.host, port=args.port, log_level="info")
+    lock = InstanceLock(Path(f"{settings.agent_db_path}.lock"))
+    try:
+        lock.acquire()
+    except RuntimeError as exc:
+        print(f"启动失败：{exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    try:
+        uvicorn.run(create_agent_app(settings), host=args.host, port=args.port, log_level="info")
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":

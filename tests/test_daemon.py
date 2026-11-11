@@ -24,9 +24,33 @@ from homelink_agent.daemon import (
     _schedule_runner,
     create_agent_app,
 )
+from homelink_agent.instance_lock import InstanceLock
 from homelink_agent.llm import OllamaError
 from homelink_agent.scheduler import SceneTriggerSchedule, Schedule, ScheduleStore
 from mcp import ClientSession
+
+
+def test_instance_lock_blocks_second_instance(tmp_path: Path) -> None:
+    path = tmp_path / "agent.db.lock"
+    first = InstanceLock(path)
+    first.acquire()
+    try:
+        with pytest.raises(RuntimeError, match="已有 agentd 实例"):
+            InstanceLock(path).acquire()
+    finally:
+        first.release()
+
+    again = InstanceLock(path)  # 释放后可以重新获取
+    again.acquire()
+    again.release()
+
+
+def test_instance_lock_release_is_idempotent(tmp_path: Path) -> None:
+    lock = InstanceLock(tmp_path / "agent.db.lock")
+    lock.release()
+    lock.acquire()
+    lock.release()
+    lock.release()
 
 
 def _settings(**overrides: Any) -> AgentSettings:

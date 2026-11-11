@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`8ae085a`，440 passed，schema v3
+> 当前基线：`8ae085a`，444 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -33,7 +33,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `440 passed` |
+| pytest | `444 passed` |
 | ruff | `All checks passed` |
 | black | `116 files unchanged` |
 | mypy | `Success: no issues found in 116 source files` |
@@ -121,15 +121,17 @@
   - 实现：`scheduler.py` 引入 `AGENT_SCHEMA_VERSION = 1` 与 `PRAGMA user_version`；`v0` 旧库自动补 `source` / `trigger_id` 并升到 `v1`；版本高于当前支持时抛 `RuntimeError`（提示升级或恢复旧备份），并关闭连接
   - 测试：新增 `test_store_sets_user_version_on_create`、`test_store_rejects_newer_schema_version`；原迁移用例补充版本断言
 
-- [ ] **C3 调度时区显式化**
-  - 现状：`datetime.now()` 使用本机时区，无配置项
-  - 动作：增加 `AGENTD_TZ`，或在文档中明确「本机时区」；补跨天与 DST 测试
-  - 验收：时区行为可预测，边界测试覆盖
+- [x] **C3 调度时区显式化**
+  - 完成：2026-11-11
+  - 决策：不新增 `AGENTD_TZ`（Windows 下需额外 `tzdata` 包，收益低于成本）；在根 `README.md` 明确「按宿主机本地墙钟时间解释、分钟粒度、不做夏令时换算，改系统时区后需重启 daemon」
+  - 测试：新增跨天/月末/闰日边界用例（`test_cron_crosses_midnight_and_month_boundaries`、`test_cron_month_end_and_leap_day`）
+  - 验收：时区行为可预测，且与本机墙钟一致
 
-- [ ] **C4 单实例防重**
-  - 现状：两个 daemon 同时运行会重复触发同一计划
-  - 动作：文件锁，或文档明确「仅支持单实例」并在启动时检测
-  - 验收：第二个实例拒绝启动或跳过执行
+- [x] **C4 单实例防重**
+  - 完成：2026-11-11
+  - 实现：新增 `src/homelink_agent/instance_lock.py`（Windows `msvcrt` / POSIX `fcntl` 文件锁）；`daemon.main()` 启动独占 `data/agent.db.lock`，第二个实例打印「已有 agentd 实例在运行」并以非 0 退出
+  - 测试：`test_instance_lock_blocks_second_instance`、`test_instance_lock_release_is_idempotent`
+  - 验收：进程退出自动释放锁，无陈旧锁文件；重复启动被拒绝
 
 - [ ] **C5 调度失败可见性**
   - 现状：失败只写审计
@@ -292,6 +294,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 A1–A5：基线改为 434 passed / schema v3，真机口径四份文档统一，验收清单补 P3 新面（§9），文档链接 0 失效 |
 | 2026-11-11 | 完成 B1（真机只读复核，未发红外）、C1（`agent.db` 纳入备份与恢复，基线 438 passed） |
 | 2026-11-11 | 完成 C2（`agent.db` 用 `PRAGMA user_version` 版本化，基线 440 passed） |
+| 2026-11-11 | 完成 C3（时区口径写入 README + 边界测试）、C4（daemon 单实例文件锁，基线 444 passed） |
 
 ---
 

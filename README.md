@@ -97,7 +97,9 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 
 掉线语义：MCP 掉线时该轮返回 502 并重置连接，**不自动重发**（避免红外重复发送）；Ollama 不可用返回 503。
 
-定时任务存独立 SQLite（`data/agent.db`，不碰 `homelink.db`），到点经 MCP 执行一次场景；执行失败只写审计（`schedule_run` / `schedule_error`），不自动重试。场景在 `homelink.db` 里维护 `enabled` / `action_groups` / `triggers`；停用的场景到点会被服务端拒绝并记审计。含高风险设备的场景在创建时必须 `confirm=true`，若之后风险升级而创建时未授权，到点会跳过并记审计。定时能力不进 MCP 工具面，避免影响工具选择准确率。
+单实例：daemon 启动时独占 `<agent.db>.lock`（操作系统文件锁，进程退出自动释放）；同一台机器重复启动会打印「已有 agentd 实例在运行」并以非 0 退出，避免两个进程重复触发同一计划。
+
+定时任务存独立 SQLite（`data/agent.db`，不碰 `homelink.db`），到点经 MCP 执行一次场景；执行失败只写审计（`schedule_run` / `schedule_error`），不自动重试。cron 按**宿主机本地墙钟时间**解释（分钟粒度，不做夏令时换算）；改系统时区后需重启 daemon 才生效。场景在 `homelink.db` 里维护 `enabled` / `action_groups` / `triggers`；停用的场景到点会被服务端拒绝并记审计。含高风险设备的场景在创建时必须 `confirm=true`，若之后风险升级而创建时未授权，到点会跳过并记审计。定时能力不进 MCP 工具面，避免影响工具选择准确率。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |

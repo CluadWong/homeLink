@@ -47,6 +47,19 @@ def test_cron_day_and_weekday_are_or_when_both_restricted() -> None:
     assert not cron_matches("0 8 1 * 1", datetime(2026, 11, 10, 8, 0))
 
 
+def test_cron_crosses_midnight_and_month_boundaries() -> None:
+    assert not cron_matches("0 0 * * *", datetime(2026, 11, 11, 23, 59))
+    assert cron_matches("0 0 * * *", datetime(2026, 11, 12, 0, 0))
+    assert cron_matches("59 23 * * *", datetime(2026, 11, 11, 23, 59))
+
+
+def test_cron_month_end_and_leap_day() -> None:
+    assert cron_matches("0 0 31 * *", datetime(2026, 12, 31, 0, 0))
+    assert not cron_matches("0 0 31 * *", datetime(2026, 11, 30, 0, 0))
+    assert cron_matches("0 0 29 2 *", datetime(2028, 2, 29, 0, 0))
+    assert not cron_matches("0 0 29 2 *", datetime(2027, 2, 28, 0, 0))
+
+
 @pytest.mark.parametrize(
     "expression",
     [
