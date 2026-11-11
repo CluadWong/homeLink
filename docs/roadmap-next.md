@@ -609,10 +609,12 @@ jobs:
 - 测试：`tests/test_scheduler.py`（旧库迁移、增删改、保留 last_run、间隔与未配置来源）、
   `tests/test_daemon.py`（scene_id 匹配、触发器过滤、启动同步落到 `/api/schedules`）
 
-**定时链路实测（2026-11-11）**：用独立端口启动 daemon（`HOMELINK_BASE_URL` 指向当前后端），
-创建 `* * * * *` 计划后连续两次到点执行「离家」，每次只产生一组 `command_requests`
-（1 台设备 `sent`），计划 `last_status=ok`；验证用数据库与审计文件已清理。
-注意 daemon 的 `HOMELINK_BASE_URL` 必须指向当前运行的后端，指向旧进程会因 schema 不符返回 500。
+**定时链路实测（2026-11-11）**：daemon（`HOMELINK_BASE_URL` 指向当前后端）启动即从场景清单
+同步出 `source=scene` 的计划（带 `trigger_id`），到点执行「离家」成功（1 台设备 `sent`，
+计划 `last_status=ok`）；另用 `* * * * *` 手工计划连续两次到点执行，每次只产生一组
+`command_requests`。验证用数据库与审计文件已清理。
+注意 daemon 的 `HOMELINK_BASE_URL` 必须指向当前运行的后端；指向旧进程会因 schema 不符返回 500，
+且常驻进程若由其他账户启动，需管理员权限才能替换。
 
 **场景最近执行记录（2026-11-11，MVP 口径）**：
 
