@@ -45,9 +45,7 @@ const enabledDraft = ref(true)
 const groupsDraft = ref<DraftGroup[]>([])
 const scheduleEnabled = ref(false)
 const scheduleCron = ref('0 23 * * *')
-const voiceEnabled = ref(false)
-const voicePhrases = ref('')
-// 设备状态触发器暂不在界面编辑，编辑时原样带回，避免整组替换时丢失。
+// 语音与设备状态触发器本期不在界面编辑，编辑时原样带回，避免整组替换时丢失。
 const preservedTriggers = ref<SceneTriggerInput[]>([])
 
 const capabilityPickerOpen = ref(false)
@@ -168,7 +166,7 @@ function triggerLabel(trigger: SceneTrigger): string {
   }
   if (trigger.type === 'voice') {
     const phrases = trigger.config.phrases
-    return Array.isArray(phrases) ? `语音 ${phrases.join(' / ')}` : '语音'
+    return Array.isArray(phrases) ? `语音 ${phrases.join(' / ')}（未接入）` : '语音（未接入）'
   }
   if (trigger.type === 'device_state') return '设备状态'
   return '手动'
@@ -207,8 +205,6 @@ function openCreate(): void {
   groupsDraft.value = [newGroup()]
   scheduleEnabled.value = false
   scheduleCron.value = '0 23 * * *'
-  voiceEnabled.value = false
-  voicePhrases.value = ''
   preservedTriggers.value = []
   actionError.value = null
   sheetOpen.value = true
@@ -227,14 +223,8 @@ function openEdit(scene: Scene): void {
   scheduleEnabled.value = Boolean(schedule)
   scheduleCron.value =
     typeof schedule?.config.cron === 'string' ? schedule.config.cron : '0 23 * * *'
-  const voice = scene.triggers.find((trigger) => trigger.type === 'voice')
-  voiceEnabled.value = Boolean(voice)
-  const phrases = voice?.config.phrases
-  voicePhrases.value = Array.isArray(phrases)
-    ? phrases.filter((item): item is string => typeof item === 'string').join('，')
-    : ''
   preservedTriggers.value = scene.triggers
-    .filter((trigger) => trigger.type === 'device_state')
+    .filter((trigger) => trigger.type === 'voice' || trigger.type === 'device_state')
     .map((trigger) => ({
       type: trigger.type,
       enabled: trigger.enabled,
@@ -292,18 +282,6 @@ function buildTriggers(): SceneTriggerInput[] {
       config: { cron: scheduleCron.value.trim() },
     })
   }
-  if (voiceEnabled.value) {
-    triggers.push({
-      type: 'voice',
-      enabled: true,
-      config: {
-        phrases: voicePhrases.value
-          .split(/[，,]/)
-          .map((item) => item.trim())
-          .filter(Boolean),
-      },
-    })
-  }
   return triggers
 }
 
@@ -329,15 +307,6 @@ async function submit(): Promise<void> {
   }
   if (scheduleEnabled.value && scheduleCron.value.trim().split(/\s+/).length !== 5) {
     showFailToast('定时触发器需要 5 段 cron 表达式')
-    return
-  }
-  if (
-    voiceEnabled.value &&
-    !voicePhrases.value
-      .split(/[，,]/)
-      .some((item) => item.trim())
-  ) {
-    showFailToast('语音触发器至少填一个短语')
     return
   }
 
@@ -645,23 +614,7 @@ onMounted(load)
           placeholder="例如：0 23 * * *"
         />
 
-        <div class="toggle-row">
-          <span>语音控制</span>
-          <button
-            class="toggle-btn"
-            :class="{ 'is-on': voiceEnabled }"
-            type="button"
-            @click="voiceEnabled = !voiceEnabled"
-          >
-            {{ voiceEnabled ? '已开启' : '关闭' }}
-          </button>
-        </div>
-        <van-field
-          v-if="voiceEnabled"
-          v-model="voicePhrases"
-          label="短语"
-          placeholder="用逗号分隔，例如：离家，我出门了"
-        />
+        <p class="sheet-note">语音触发器本期不开放；已有配置保存时原样保留。</p>
 
         <ErrorBanner v-if="actionError" :error="actionError" />
 

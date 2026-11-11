@@ -4,7 +4,7 @@
 
 ## 是什么
 
-- 后端 FastAPI + SQLite，33 个 `/api` 端点（21 传统 + 12 Agent）；schema `SCHEMA_VERSION = 2`。正式前端是 `frontend/`（Vue，构建产物 `frontend/dist`），生产由后端**同源托管**；`interface/clients/streamlit/` 是旧的过渡六页，已不参与启动流程。
+- 后端 FastAPI + SQLite，37 个 `/api` 端点（21 传统 + 16 Agent）；schema `SCHEMA_VERSION = 3`。正式前端是 `frontend/`（Vue，构建产物 `frontend/dist`），生产由后端**同源托管**；`interface/clients/streamlit/` 是旧的过渡六页，已不参与启动流程。
 - 硬件是一台 ESPHome 红外网关；`mock` 模式无需任何硬件即可跑通「建设备 → 学码 → 调用」（学码默认 `no_signal`，可显式注入固定波形）。没有内置功能、能力或策略；传感器本期不接入。
 
 ## 启动（最小可复现）
