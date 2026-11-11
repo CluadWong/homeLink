@@ -3,16 +3,16 @@
 本文件规划「红外设备管家（执行层）」到「上层智能管家 Agent」的演进顺序与验收口径。
 定位不变：本仓库负责设备、学码、单次回放、虚拟状态与审计；**Agent 是独立进程**，只通过 HTTP 调用本服务，不进入 `homelink` 包、不直接读写 SQLite。
 
-## 现状基线（2026-11-10）
+## 现状基线（2026-11-11）
 
 | 项 | 现状 |
 | --- | --- |
-| 后端 | FastAPI 单进程 + 单 SQLite（schema v2）；26 条路径 / 33 个端点（21 传统 + 12 Agent），11 个错误码，`X-Trace-Id` 全链路 |
-| Agent 接口 | `/api/agent/*` 粗粒度命名空间：设备模型含 `type/room/aliases/risk_level/capabilities/state`，`request_id` 幂等，场景仅顺序执行 |
+| 后端 | FastAPI 单进程 + 单 SQLite（schema v3）；28 条路径 / 37 个端点（21 传统 + 16 Agent），11 个错误码，`X-Trace-Id` 全链路 |
+| Agent 接口 | `/api/agent/*` 粗粒度命名空间：设备模型含 `type/room/aliases/risk_level/capabilities/state`，`request_id` 幂等；场景按动作组顺序执行，含定时触发器与最近执行记录 |
 | 工具面 | `src/homelink_mcp` 把 6 个能力封装成 MCP 工具（stdio）；`src/homelink_agent` 是本地 Ollama 侧车，工具 schema 由 `tools/list` 动态生成 |
-| 前端 | Vue 3 正式前端已构建并由后端同源托管；Streamlit 六页保留但非启动入口 |
+| 前端 | Vue 3 正式前端已构建并由后端同源托管；场景页含编辑、执行与历史记录；Streamlit 六页保留但非启动入口 |
 | 硬件 | 一台 ESPHome 红外网关；`mock` / `real` 只靠配置切换 |
-| 验证 | 全量 pytest 280 passed（2026-11-10，P0-1~P0-5 收口后）；ruff / black / mypy 全绿；真实板子只做只读探测，从未发送真实红外 |
+| 验证 | 全量 pytest 384 passed（2026-11-11）；ruff / black / mypy 全绿；真实板子学码 / 回放已验收，详见 `acceptance-checklist.md` |
 | 运维 | 开机静默自启（计划任务 `HomeLinkService` / `HomeLinkAgent`）+ 每日 03:00 自动备份（`HomeLinkBackup`）+ 登录后地址展示（`HomeLinkAddresses`） |
 
 ## 总体原则
@@ -37,7 +37,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 | M2 语义与安全 | 完成 | 统一设备 ID/房间/别名、能力描述、`request_id` 幂等、高风险确认、11 个错误码、审计 |
 | M3 Agent MVP | MVP 完成（P0 已收口） | `homelink_mcp`（6 工具）+ `homelink_agent`（Ollama `qwen3.5:9b`），运行时拦截模型自补确认；P0 收口（2026-11-10）：`request_id` 运行时注入、场景高风险强制确认、`X-Actor`/`X-Trace-Id` 透传、契约同步测试 |
 | M4 语音入口 | 暂缓（已决策） | 文本链路已稳定；先用一段时间再定是否启动 |
-| M5 自动化 | 部分 | 场景已恢复（仅按顺序执行一组功能，高风险场景需确认后执行）；Agent 审计与重试策略已补；定时/规则仍返回 501 |
+| M5 自动化 | 部分 | 场景（动作组 + 高风险确认 + 执行记录）与场景定时触发器已落地；定时由 Agent 侧调度器同步并到点经 MCP 触发；设备状态规则仍返回 501 |
 
 ### M0 收口现状
 
@@ -108,7 +108,8 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 
 ### M5 自动化与多网关（按需，最后做）
 
-- 场景已恢复，但只支持「按顺序执行一组已有功能」（`POST /api/agent/scenes/{id}/run`），不引入调度器；定时 / 规则仍返回 501。若要做定时，应由 Agent 侧调度，通过 HTTP 触发场景，不回到本服务。
+- 场景已恢复（按动作组顺序执行一组已有功能，`POST /api/agent/scenes/{id}/run`），高风险场景需确认；执行记录只读可查（`GET /api/agent/scenes/{id}/runs`）。
+- 定时已落地但不回到本服务：Agent 侧调度器（`homelink-agentd`）每 300 秒从场景的 `schedule` 触发器同步计划，到点经 MCP `home_run_scene` 触发；设备状态规则仍返回 501。
 - Agent 侧审计已落地：`logs/agent-audit.jsonl` 逐行记录 `turn_start / tool_call / confirm_downgraded / turn_end / turn_error`，可用 `AGENT_AUDIT_PATH` 改路径或 `off` 关闭。
 - 服务端重试策略已明确写入契约：调用方不得自动重发；`GATEWAY_TIMEOUT` 视为「可能已发出」，`EXECUTION_FAILED / DEVICE_OFFLINE` 可在用户确认后用新 `request_id` 重发。
 - 多网关需要把 `gateway` 从单实例改为多实例，会触及配置、探测与调用路由，属于 v2 契约变更，需单独设计评审。
@@ -119,7 +120,7 @@ M0 收口 ──▶ M1 工具层 ──▶ M2 语义与安全 ──▶ M3 Agent
 
 | 问题 | 影响 | 建议 |
 | --- | --- | --- |
-| 是否恢复场景 / 定时 | 决定 M5 是否启动 | 已决策：场景恢复为「顺序执行一组功能」，定时不做 |
+| 是否恢复场景 / 定时 | 决定 M5 是否启动 | 已决策：场景恢复为「动作组顺序执行」，定时走 Agent 侧调度器同步场景触发器；设备状态规则不做 |
 | 是否支持多网关 | 决定是否进入 v2 契约 | 单网关够用时不做 |
 | 是否引入语音 | 决定 M4 优先级 | 已决策：暂缓，实际使用文本链路一段时间后再评估 |
 | Agent 是否需要来源标识 | 影响审计字段 | 默认不加，审计已可按 `trace_id` 串联 |

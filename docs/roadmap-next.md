@@ -1,7 +1,7 @@
 # HomeLink 下一阶段开发路线（交接给执行 Agent）
 
-> 文档状态：待执行
-> 基线提交：`d9adaec`（2026-11-10）
+> 文档状态：已完成（P0–P3 除语音外，2026-11-11；P4 仍按需）
+> 基线提交：`d9adaec`（2026-11-10）；最近推进：场景页、定时触发器、执行记录、语音触发器冻结（`bcbc69f`）
 > 适用范围：`src/homelink`、`src/homelink_mcp`、`src/homelink_agent`、`tests/`、`docs/`
 > 本文件是执行清单，不是愿景文档。每张任务卡都必须有代码、测试、文档三件套。
 
@@ -608,6 +608,11 @@ jobs:
   并记 `schedule_error`，不会绕过确认
 - 测试：`tests/test_scheduler.py`（旧库迁移、增删改、保留 last_run、间隔与未配置来源）、
   `tests/test_daemon.py`（scene_id 匹配、触发器过滤、启动同步落到 `/api/schedules`）
+
+**定时链路实测（2026-11-11）**：用独立端口启动 daemon（`HOMELINK_BASE_URL` 指向当前后端），
+创建 `* * * * *` 计划后连续两次到点执行「离家」，每次只产生一组 `command_requests`
+（1 台设备 `sent`），计划 `last_status=ok`；验证用数据库与审计文件已清理。
+注意 daemon 的 `HOMELINK_BASE_URL` 必须指向当前运行的后端，指向旧进程会因 schema 不符返回 500。
 
 **场景最近执行记录（2026-11-11，MVP 口径）**：
 
