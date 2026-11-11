@@ -34,6 +34,7 @@ from homelink.interface.api.routers import (
     rooms,
     state,
 )
+from homelink.interface.clients.agentd import client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def create_app(context: AppContext) -> FastAPI:
     app = FastAPI(title="HomeLink", version="0.1.0")
     app.state.context = context
     app.state.metrics = RequestMetrics(clock=time.perf_counter)
+    app.state.agentd = client_from_env()
     metrics = app.state.metrics
 
     @app.middleware("http")

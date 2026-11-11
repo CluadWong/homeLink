@@ -59,7 +59,7 @@
 - 开启但缺 `dist/index.html`：启动日志打 WARNING，非 API 路径返回 **503 纯文本**「前端未构建…请先 `npm run build`」，`/api` 不受影响（**不是 500**）。
 - 生产**不使用 Vite dev server**：页面与 API 同源同端口，构建产物由后端直接提供；静态页面与 `/docs` 不受 token 约束。
 
-## 2. 端点清单（38 个）
+## 2. 端点清单（39 个）
 
 ### 2.1 健康检查与指标
 
@@ -145,7 +145,7 @@
 成功：`{records:[{created_at,action,device_id,result,reason,trace_id}], trace_id}`。
 `limit` 1–200（默认 50）；`result` 三值 `success` / `failed` / `all`（`all` 或缺省表示不筛选）；`device_id` 按 `audit_logs.device_id` **精确匹配**（空值记录不参与）。非法 → 400。
 
-### 2.10 Agent 能力（15）
+### 2.10 Agent 能力（16）
 
 前缀 `/api/agent`，成功统一返回 `{success, result, trace_id}`。请求头可选 `X-Actor`（≤ 64 字符，默认 `user`），只用于记录调用方，不参与鉴权；Agent 侧 MCP 客户端固定发送 `X-Actor: butler-agent`（`HOMELINK_ACTOR` 可覆盖）与每请求生成的 `X-Trace-Id`，审计按 `actor` 与 `trace_id` 串链。
 
@@ -167,6 +167,7 @@
 | 场景执行记录 | `GET /api/agent/scenes/{scene_id}/runs?limit=` |
 | 设备元数据 | `PUT /api/agent/devices/{device_id}/metadata` |
 | 自动化（未支持） | `POST /api/agent/automations` → 501 |
+| 定时任务状态 | `GET /api/agent/schedules`（后端代理 agentd；不可达 → 503 `DEVICE_OFFLINE`） |
 
 - 设备模型：`device_id / type / room / name / aliases / risk_level / online / online_scope / capabilities / state / state_source / state_updated_at / state_readback`。
 - `online` 取网关探测结果，同一网关下所有设备一致，`online_scope` 恒为 `gateway`；不承诺逐设备在线。
@@ -189,6 +190,7 @@
 - 跑场景接受可选 body `{confirm: false}`：无 body 按 `confirm=false` 处理，未声明字段 400 `INVALID_REQUEST`。`contains_high_risk=true` 的场景未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`，且不产生任何 `command_requests` 记录；确认后逐 target 发送，每个 target 只产生一条记录。
 - **场景执行记录** `GET /api/agent/scenes/{scene_id}/runs?limit=` → `{scene_id, runs:[{trace_id, started_at, status, summary:{total, sent, failed}, results:[{device_id, command, status, error_code, error_message}]}]}`，只读。`limit` 1–50，默认 10，越界 400；场景不存在 404。同一次执行的目标共享 `trace_id`，据此聚合并按最新在前排序；`status` 同样是 `sent / partial / failed`。记录直接来自 `command_requests`，未真正下发（离线 / 缺少能力）的 target 不会出现，因此 `total` 可能小于场景目标数。
 - 自动化规则本期不实现，固定 501 `NOT_SUPPORTED`。
+- **定时任务状态** `GET /api/agent/schedules` → `{count, schedules:[{id, scene_id, cron, enabled, confirm, created_at, last_run_at, last_status, last_error, source, trigger_id}]}`。数据源是 Agent 侧 `agentd` 的 `GET /api/schedules`（计划表在 `agent.db`），浏览器不直连 8100，由后端按 `HOMELINK_AGENTD_URL`（默认 `http://127.0.0.1:8100`）与 `HOMELINK_AGENTD_TOKEN` 代理；`agentd` 未启动或超时（3 s）→ 503 `DEVICE_OFFLINE`，前端显示「定时状态暂不可用」，不影响场景列表。`last_status` 为 `ok / error / null`（从未执行），失败原因在 `last_error`；失败**不会自动重试**，需用户手动处理。
 
 ## 3. 学码契约
 

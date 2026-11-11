@@ -1,6 +1,6 @@
 # 验收清单（重建版后端 + Vue 正式前端）
 
-基准日期：2026-11-06，终态更新 2026-11-08，P0 收口复测 2026-11-10，单 Agent 真机冒烟 2026-11-11。证据口径：全量测试 **472 passed**（2026-11-11；198 passed 为 2026-11-08 里程碑验收的历史值）；真机（192.168.10.3）已完成「学码 → 保存 → 试一次」与「调用」端到端验收，期间真实发送过红外，结果由用户人眼确认；2026-11-11 补做单设备控制、场景执行、定时触发冒烟各 1 次，均 `status=sent`（详见 [backlog.md](./backlog.md) L5）。
+基准日期：2026-11-06，终态更新 2026-11-08，P0 收口复测 2026-11-10，单 Agent 真机冒烟 2026-11-11。证据口径：全量测试 **474 passed**（2026-11-11；198 passed 为 2026-11-08 里程碑验收的历史值）；真机（192.168.10.3）已完成「学码 → 保存 → 试一次」与「调用」端到端验收，期间真实发送过红外，结果由用户人眼确认；2026-11-11 补做单设备控制、场景执行、定时触发冒烟各 1 次，均 `status=sent`（详见 [backlog.md](./backlog.md) L5）。
 
 图例：✅ 已实现且有单测 ｜ 🟢 已真机验证 ｜ 🟡 代码存在但无自动化/运行验证 ｜ 🟠 只有单测替身证据、未真机验证 ｜ ❌ 未实现 ｜ ⚠️ 文档与实现不符（已在本轮修正）
 
@@ -33,7 +33,7 @@
 | 装配顺序（DB→配置→网关→仓储→服务域） | ✅ | `build_context` 单测通过；文档原写的 `state_store.restore` 不存在，已改为「读库即恢复」 ⚠️ |
 | 控制链路五步 | ✅ / 🟢 real | `ControlService` 单测：取功能→取最新码→回放→写 `unknown`→审计；真机回放成功，断电时在第一步即失败且不写状态 |
 | 运行时可改项与重启边界 | ✅ | `PUT /api/gateway` 写覆盖层 + `pending_restart`；其余重启生效 |
-| 38 个 HTTP 端点（22 传统 + 16 Agent，29 条路径） | ✅ | `test_api_common.py` 及端点级测试；`/openapi.json` 实测 29 paths / 38 endpoints |
+| 39 个 HTTP 端点（22 传统 + 17 Agent，30 条路径） | ✅ | `test_api_common.py` 及端点级测试；`/openapi.json` 实测 30 paths / 39 endpoints |
 | 目录骨架 | 🟡 | `scripts/start.py`、流式前端已存在；`agent_future/`、`hardware/ir-codes/` 目录不存在（未引用，不影响运行） |
 | ADR-01 网关抽象 | ✅ / 🟢 real | `IRGateway` + mock/real 两实现；real 实现在真机完成探测、学码、回放 |
 | ADR-02 功能即调用单元 | ✅ | 无能力表、无参数，`function_id` 唯一寻址 |
@@ -170,7 +170,7 @@
 | 场景前端页 | ✅ 代码 / ✅ UI 自动化 | `frontend/src/views/ScenesView.vue`（列表、编辑、执行、最近执行）；`tests/e2e/test_scenes_page.py` 覆盖列表→新建→编辑→执行→结果弹层→执行记录，`pytest -m e2e` 一键运行，CI `e2e` job 执行 |
 | `data/agent.db` 备份与恢复 | ✅ | `scripts/backup.py` 默认同时快照 `agent-*.db`，`restore.py` 按前缀自动恢复；`test_backup_restore.py` 4 条（见 backlog C1） |
 | `agent.db` schema 版本化 | ✅ | `PRAGMA user_version`（`AGENT_SCHEMA_VERSION = 1`）；v0 自动升级，版本过高明确报错；见 backlog C2 |
-| 调度失败可见性 | 🟡 | `last_status` / `last_error` 已入库且 `GET /api/schedules` 返回，前端未展示（见 backlog C5） |
+| 调度失败可见性 | ✅ | 后端 `GET /api/agent/schedules` 代理 agentd；场景页展示上次执行状态与 `last_error`，失败计划页首汇总并注明不自动重试；agentd 不可达时降级提示 |
 | daemon 单实例防重 | ✅ | `InstanceLock`（`msvcrt` / `fcntl` 文件锁）在 `main()` 启动时独占 `<agent.db>.lock`；`test_instance_lock_blocks_second_instance` |
 | 数据保留期 | ✅ | 状态 90 / 审计 365 / 指令 180 天，启动时清理；场景「最近执行」由指令记录派生（见 backlog C6） |
 | 审计隐私 | ✅ | 根 `README.md` 明确审计含用户原话与工具参数属敏感数据；`rotate_logs.py` 覆盖 `.jsonl`（见 backlog C7） |

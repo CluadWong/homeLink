@@ -24,6 +24,7 @@ import type {
   SceneRunPayload,
   SceneRunsPayload,
   SceneTriggerInput,
+  ScheduleListPayload,
 } from './types'
 
 const TOKEN_KEY = 'homelink_api_token'
@@ -306,6 +307,10 @@ export function fetchSceneRuns(sceneId: string, limit = 5): Promise<SceneRunsPay
     `/api/agent/scenes/${encodeURIComponent(sceneId)}/runs`,
     { params: { limit } },
   )
+}
+
+export function fetchSchedules(): Promise<ScheduleListPayload> {
+  return request<ScheduleListPayload>('GET', '/api/agent/schedules')
 }
 
 // ---------------------------------------------------------------- 学码

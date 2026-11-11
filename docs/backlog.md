@@ -33,10 +33,10 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `472 passed` |
+| pytest | `474 passed` |
 | ruff | `All checks passed` |
-| black | `120 files unchanged` |
-| mypy | `Success: no issues found in 120 source files` |
+| black | `123 files unchanged` |
+| mypy | `Success: no issues found in 123 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -136,10 +136,14 @@
   - 验收：进程退出自动释放锁，无陈旧锁文件；重复启动被拒绝
   - 提交：`f0511b5`
 
-- [ ] **C5 调度失败可见性**
+- [x] **C5 调度失败可见性**
+  - 完成：2026-11-11
   - 现状：失败只写审计
   - 动作：前端明确展示 `last_status` 与失败原因；必要时本地告警
-  - 验收：失败计划在界面上可见，不静默
+  - 实现：后端新增 `GET /api/agent/schedules`，代理 agentd 的 `GET /api/schedules`（`HOMELINK_AGENTD_URL` / `HOMELINK_AGENTD_TOKEN`，3 s 超时；不可达 → 503 `DEVICE_OFFLINE`）；前端场景页加载计划状态，卡片上显示「上次执行成功 / 失败 · 原因」，失败计划在页首汇总列出且注明不会自动重试；agentd 未启动时显示「定时状态暂不可用」，场景列表照常
+  - 测试：`tests/test_agent_schedules_api.py` 覆盖代理成功与 503；`vue-tsc` 通过；全量 474 passed、0 skipped（123 files）
+  - 验收：失败计划在界面上可见，不静默；端点口径 39（22 传统 + 17 Agent）/ 30 条路径
+  - 提交：待回填
 
 - [x] **C6 数据保留策略**
   - 完成：2026-11-11
@@ -201,10 +205,13 @@
 ---
 ## E. 交付形态（P2）
 
-- [ ] **E1 Linux / Docker 部署**
+- [x] **E1 Linux / Docker 部署**
+  - 完成：2026-11-11
   - 现状：仅 Windows 计划任务
   - 动作：Dockerfile + compose，或 systemd unit
-  - 验收：非 Windows 环境可启动后端与 daemon
+  - 实现：`Dockerfile` 两段构建（Node 22 产出 `frontend/dist` → Python 3.12 运行镜像，`pip install ".[agent]"` 同时带 MCP / daemon）；`docker-compose.yml` 起 `backend`（8000，同源托管前端，代理调度状态到 `http://agent:8100`）与 `agent`（8100，`agentd`，Ollama 经 `host.docker.internal` / `host-gateway`），共享宿主 `config/`、`data/`、`logs/`；`.dockerignore`；README 新增「Linux / Docker 部署」；CI 新增 `docker` job（ubuntu 上构建、起双容器、健康检查 + `/api/agent/schedules` 冒烟）
+  - 验收：非 Windows 环境可启动后端与 daemon —— 本机无 Docker，**未在 Windows 上实机验证**镜像运行；Dockerfile / compose 已做 YAML 解析与路径核对（`config_dir.parent` → `/app/frontend/dist` 与镜像布局一致），实际构建与启动由 CI `docker` job 在 ubuntu-latest 验证；本机全量 474 passed / 123 files
+  - 提交：待回填
 
 - [ ] **E2 一键部署 / 升级 / 回滚**
   - 内容：配置迁移、数据库迁移、版本检查
@@ -326,6 +333,8 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 D5（性能与容量基线：`scripts/benchmark.py` + `docs/performance.md`） |
 | 2026-11-11 | 完成 D1（场景页 Playwright E2E：新建/编辑/执行/结果/记录，CI 新增 e2e job；默认 pytest 仍 472 passed） |
 | 2026-11-11 | 完成 D3（评测常态化：`eval_sandbox.py` 自建 mock 后端 + 每周 `HomeLinkEval` 任务；本地 qwen3.5:9b 130 条 83.8%、误发 1，报告如实判未达标；基线 472 passed / 121 files） |
+| 2026-11-11 | 完成 C5（调度失败可见性：后端 `/api/agent/schedules` 代理 agentd，场景页展示上次状态与失败原因；端点口径 39 / 30 路径） |
+| 2026-11-11 | 完成 E1（Linux / Docker 部署：`Dockerfile` + `docker-compose.yml` + `.dockerignore`，CI 新增 docker job 在 ubuntu 构建并冒烟双容器） |
 
 ---
 

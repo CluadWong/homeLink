@@ -50,7 +50,7 @@
 
 | 面 | 形态 | 用途 | 是否契约 |
 | --- | --- | --- | --- |
-| HTTP API | 38 个端点（旧 22 + Agent 16） | 唯一程序化入口 | 是，见 `api-contract.md` |
+| HTTP API | 39 个端点（旧 22 + Agent 17） | 唯一程序化入口 | 是，见 `api-contract.md` |
 | MCP 工具面 | `src/homelink_mcp`，6 个工具，stdio | Agent 侧接入方式，经 HTTP 调 `/api/agent` | 否，可替换 |
 | 本地管家 Agent | `src/homelink_agent`，消费 MCP + Ollama | 文本对话入口 | 否 |
 | 配置目录 | `settings*.yaml`、`devices.yaml`（仅房间种子） | 部署期输入 | 是 |

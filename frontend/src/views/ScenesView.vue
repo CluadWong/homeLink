@@ -8,6 +8,7 @@ import {
   fetchCapabilities,
   fetchSceneRuns,
   fetchScenes,
+  fetchSchedules,
   patchScene,
   runScene,
 } from '../api/client'
@@ -19,6 +20,7 @@ import type {
   SceneRunResult,
   SceneTrigger,
   SceneTriggerInput,
+  ScheduleRecord,
 } from '../api/types'
 import EmptyBlock from '../components/EmptyBlock.vue'
 import ErrorBanner from '../components/ErrorBanner.vue'
@@ -60,6 +62,10 @@ const runningId = ref<string | null>(null)
 const runsByScene = ref<Record<string, SceneRunRecord[]>>({})
 const historyOpen = ref(false)
 const historySceneId = ref<string | null>(null)
+
+// 定时任务上次执行状态：来自 agentd，后端代理读出；不可用时不阻塞场景列表。
+const schedules = ref<ScheduleRecord[]>([])
+const schedulesUnavailable = ref(false)
 
 const capabilityMap = computed(() => {
   const map = new Map<string, Capability>()
@@ -115,6 +121,49 @@ function lastRunLabel(scene: Scene): string {
 
 function lastRunStatus(scene: Scene): string {
   return lastRun(scene)?.status ?? 'none'
+}
+
+const failedSchedules = computed(() =>
+  schedules.value.filter((item) => item.enabled && item.last_status === 'error'),
+)
+
+function sceneName(sceneId: string): string {
+  return scenes.value.find((scene) => scene.scene_id === sceneId)?.name ?? sceneId
+}
+
+function scheduleOf(scene: Scene): ScheduleRecord | undefined {
+  return schedules.value
+    .filter((item) => item.scene_id === scene.scene_id && item.enabled)
+    .sort((left, right) => (right.last_run_at ?? '').localeCompare(left.last_run_at ?? ''))[0]
+}
+
+function scheduleStatusLabel(scene: Scene): string {
+  const schedule = scheduleOf(scene)
+  if (!schedule) return ''
+  if (!schedule.last_run_at) return '定时：尚未执行'
+  const when = formatRunTime(schedule.last_run_at)
+  if (schedule.last_status === 'error') {
+    return `定时：${when} 执行失败 · ${schedule.last_error ?? '原因未记录'}`
+  }
+  return `定时：${when} 执行成功`
+}
+
+function scheduleStatusClass(scene: Scene): string {
+  const status = scheduleOf(scene)?.last_status
+  if (status === 'error') return 'is-failed'
+  if (status === 'ok') return 'is-ok'
+  return ''
+}
+
+async function loadSchedules(): Promise<void> {
+  try {
+    const payload = await fetchSchedules()
+    schedules.value = payload.result.schedules
+    schedulesUnavailable.value = false
+  } catch {
+    schedules.value = []
+    schedulesUnavailable.value = true
+  }
 }
 
 function deviceName(deviceId: string): string {
@@ -182,7 +231,7 @@ async function load(): Promise<void> {
     ])
     scenes.value = scenePayload.result.scenes
     capabilities.value = capabilityPayload.result.capabilities
-    await loadRuns()
+    await Promise.all([loadRuns(), loadSchedules()])
   } catch (error) {
     loadError.value = toApiError(error)
   } finally {
@@ -432,6 +481,21 @@ onMounted(load)
 
       <ErrorBanner v-if="actionError" :error="actionError" />
 
+      <div v-if="failedSchedules.length" class="scene-alert">
+        <p class="scene-alert-head">
+          定时任务失败 {{ failedSchedules.length }} 个：上次执行未成功，系统不会自动重试。
+        </p>
+        <ul>
+          <li v-for="item in failedSchedules" :key="item.id">
+            {{ sceneName(item.scene_id) }} · {{ item.cron }} · {{ formatRunTime(item.last_run_at ?? '') }}：
+            {{ item.last_error ?? '原因未记录' }}
+          </li>
+        </ul>
+      </div>
+      <p v-else-if="schedulesUnavailable" class="schedule-note">
+        定时任务状态暂不可用（调度服务 agentd 未启动或不可达）。
+      </p>
+
       <EmptyBlock
         v-if="scenes.length === 0"
         title="还没有场景"
@@ -475,6 +539,10 @@ onMounted(load)
           <span v-for="trigger in scene.triggers" :key="trigger.trigger_id" class="scene-trigger">
             {{ triggerLabel(trigger) }}{{ trigger.enabled ? '' : '（停用）' }}
           </span>
+        </p>
+
+        <p v-if="scheduleOf(scene)" class="scene-schedule" :class="scheduleStatusClass(scene)">
+          {{ scheduleStatusLabel(scene) }}
         </p>
 
         <button class="run-history-trigger" type="button" @click="openHistory(scene)">

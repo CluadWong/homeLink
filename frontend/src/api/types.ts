@@ -234,6 +234,27 @@ export interface SceneRunsPayload {
   trace_id: string
 }
 
+/** 定时任务的上次执行状态（由 agentd 写入 agent.db，后端代理读出）。 */
+export interface ScheduleRecord {
+  id: string
+  scene_id: string
+  cron: string
+  enabled: boolean
+  confirm: boolean
+  created_at: string
+  last_run_at: string | null
+  last_status: 'ok' | 'error' | null
+  last_error: string | null
+  source: string
+  trigger_id: string | null
+}
+
+export interface ScheduleListPayload {
+  success: true
+  result: { count: number; schedules: ScheduleRecord[] }
+  trace_id: string
+}
+
 export interface CapabilityListPayload {
   success: true
   result: { count: number; capabilities: Capability[] }

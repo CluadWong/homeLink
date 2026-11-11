@@ -14,6 +14,7 @@ from homelink.interface.api.schemas import (
     AgentSceneRunRequest,
 )
 from homelink.interface.api.security import require_token
+from homelink.interface.clients.agentd import AgentdUnavailableError
 
 router = APIRouter(prefix="/api/agent", tags=["agent"], dependencies=[Depends(require_token)])
 
@@ -197,6 +198,20 @@ def list_scene_runs(request: Request, scene_id: str, limit: int = 10) -> dict:
         raise AppError(ErrorCode.INVALID_REQUEST, "limit 需在 1–50 之间")
     context = request.app.state.context
     return _envelope(request, context.agent.scene_runs(scene_id, limit=limit))
+
+
+@router.get("/schedules")
+def list_schedules(request: Request) -> dict:
+    """定时任务状态（代理 agentd）：前端据此展示上次执行结果与失败原因。"""
+
+    try:
+        items = request.app.state.agentd.list_schedules()
+    except AgentdUnavailableError:
+        raise AppError(
+            ErrorCode.DEVICE_OFFLINE,
+            "调度服务（agentd）不可达，定时任务状态暂不可用；请确认 agentd 已启动后重试。",
+        ) from None
+    return _envelope(request, {"count": len(items), "schedules": items})
 
 
 @router.post("/automations")
