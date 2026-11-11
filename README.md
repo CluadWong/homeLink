@@ -121,6 +121,8 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 
 审计日志逐行记录 `turn_start` / `tool_call` / `confirm_requested` / `confirm_granted` / `confirm_denied` / `confirm_expired` / `turn_end` / `turn_error` / `schedule_created` / `schedule_deleted` / `schedule_run` / `schedule_error` / `shutdown`，每条带时间戳与参数，用于回溯「谁在什么时候让 Agent 做了什么」。
 
+隐私边界：审计包含用户原话（`turn_start.message`）、工具名与参数、确认结果，属敏感数据；只写本机 `logs/agent-audit.jsonl`（不落库、不外发），`rotate_logs.py` 会滚动 `.jsonl` 并保留 3 份，不想留痕时可直接删除该文件（不影响 daemon 运行）。
+
 高风险设备（`risk_level=high`）由运行时兜底：模型不能自己补 `confirm=true`，只有「上一轮被拦下的同一设备 + 本轮用户明确同意」才放行；其他情况一律降级为 `confirm=false`，由服务端返回 409。
 
 ## 文档

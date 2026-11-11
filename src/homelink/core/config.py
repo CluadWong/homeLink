@@ -111,6 +111,7 @@ class Settings:
     gateway: GatewayConfig
     state_retention_days: int
     audit_retention_days: int
+    command_retention_days: int
     api_token: str
     frontend: FrontendConfig = field(default_factory=FrontendConfig)
 
@@ -524,7 +525,7 @@ def _read_room_seeds(config_dir: Path) -> tuple[RoomSeed, ...]:
     return _parse_room_seeds(_effective(config_dir, "devices.yaml"))
 
 
-_SETTINGS_KEYS = {"gateway", "state", "audit", "api", "frontend"}
+_SETTINGS_KEYS = {"gateway", "state", "audit", "commands", "api", "frontend"}
 _GATEWAY_KEYS = {"mode", "ir", "probe_timeout_seconds"}
 _IR_KEYS = {"base_url", "username", "password"}
 _RETENTION_KEYS = {"retention_days"}
@@ -565,6 +566,12 @@ def _parse_settings(raw: Mapping[str, Any]) -> Settings:
     _reject_unknown(audit, _RETENTION_KEYS, "settings.yaml:audit")
     audit_days = _integer(audit.get("retention_days"), "settings.yaml:audit.retention_days", 365)
 
+    commands = _mapping(raw.get("commands"), "settings.yaml:commands", optional=True)
+    _reject_unknown(commands, _RETENTION_KEYS, "settings.yaml:commands")
+    command_days = _integer(
+        commands.get("retention_days"), "settings.yaml:commands.retention_days", 180
+    )
+
     api = _mapping(raw.get("api"), "settings.yaml:api", optional=True)
     _reject_unknown(api, _API_KEYS, "settings.yaml:api")
     token = _text(api.get("token"), "settings.yaml:api.token").strip()
@@ -591,6 +598,7 @@ def _parse_settings(raw: Mapping[str, Any]) -> Settings:
         ),
         state_retention_days=state_days,
         audit_retention_days=audit_days,
+        command_retention_days=command_days,
         api_token=token,
         frontend=FrontendConfig(enabled=frontend_enabled, dist_path=dist_path),
     )

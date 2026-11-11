@@ -116,14 +116,16 @@ def sync_config_to_database(config: ConfigService, db: Database) -> None:
 
 
 def purge_retention(config: ConfigService, db: Database, *, now: datetime | None = None) -> None:
-    """按保留期清理 `device_states` 与 `audit_logs`（只按 created_at 早于 cutoff）。"""
+    """按保留期清理状态、审计与指令记录；场景「最近执行」由 command_requests 派生。"""
 
     current = now or datetime.now(UTC)
     state_cutoff = _cutoff(current, config.settings.state_retention_days)
     audit_cutoff = _cutoff(current, config.settings.audit_retention_days)
+    command_cutoff = _cutoff(current, config.settings.command_retention_days)
     with db.transaction() as conn:
         conn.execute("DELETE FROM device_states WHERE created_at < ?", (state_cutoff,))
         conn.execute("DELETE FROM audit_logs WHERE created_at < ?", (audit_cutoff,))
+        conn.execute("DELETE FROM command_requests WHERE created_at < ?", (command_cutoff,))
 
 
 def _cutoff(now: datetime, days: int) -> str:

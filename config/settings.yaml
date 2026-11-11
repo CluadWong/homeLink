@@ -14,6 +14,9 @@ state:
 audit:
   retention_days: 365
 
+commands:
+  retention_days: 180  # command_requests 保留期；场景「最近执行」由它派生
+
 api:
   token: ""           # 空串 = 完全不校验；非空需 Bearer
 

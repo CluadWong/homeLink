@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`8ae085a`，444 passed，schema v3
+> 当前基线：`8ae085a`，445 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -33,7 +33,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `444 passed` |
+| pytest | `445 passed` |
 | ruff | `All checks passed` |
 | black | `116 files unchanged` |
 | mypy | `Success: no issues found in 116 source files` |
@@ -141,15 +141,16 @@
   - 动作：前端明确展示 `last_status` 与失败原因；必要时本地告警
   - 验收：失败计划在界面上可见，不静默
 
-- [ ] **C6 数据保留策略**
-  - 现状：`device_states` / `audit_logs` 有保留期，`command_requests` 无
-  - 动作：定义 `command_requests` 保留期与场景执行记录归档策略
-  - 验收：长期运行数据库不无限增长；历史记录保留口径写进文档
+- [x] **C6 数据保留策略**
+  - 完成：2026-11-11
+  - 实现：`config/settings.yaml` 新增 `commands.retention_days: 180`；`purge_retention` 启动时同时清理 `command_requests`；场景「最近执行」由 `command_requests` 派生，随同一保留期，不另建归档表
+  - 测试：`test_retention_purges_only_rows_older_than_cutoff` 增加指令记录断言；新增 `test_retention_defaults_command_days_to_180`
+  - 验收：三张表都有明确保留期（状态 90 / 审计 365 / 指令 180 天），长期运行数据库不再无限增长；口径写入 `settings.yaml` 注释
 
-- [ ] **C7 审计隐私**
-  - 现状：`logs/agent-audit.jsonl` 记录用户原话与工具参数
-  - 动作：保留期、敏感字段脱敏或访问说明
-  - 验收：文档明确敏感字段；轮转已覆盖（`rotate_logs.py` 支持 `.jsonl`）
+- [x] **C7 审计隐私**
+  - 完成：2026-11-11
+  - 决策：不做自动脱敏（会破坏回溯价值），改为「访问与保留说明」：根 `README.md` 明确审计含用户原话、工具名与参数、确认结果，属敏感数据，只写本机、不落库、不外发
+  - 保留：`rotate_logs.py` 已覆盖 `.jsonl`（默认保留 3 份）；不需要留痕时可直接删除 `logs/agent-audit.jsonl`，不影响运行
 
 ---
 
@@ -298,6 +299,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 B1（真机只读复核，未发红外）、C1（`agent.db` 纳入备份与恢复，基线 438 passed） |
 | 2026-11-11 | 完成 C2（`agent.db` 用 `PRAGMA user_version` 版本化，基线 440 passed） |
 | 2026-11-11 | 完成 C3（时区口径写入 README + 边界测试）、C4（daemon 单实例文件锁，基线 444 passed） |
+| 2026-11-11 | 完成 C6（`command_requests` 保留期 180 天）、C7（审计隐私与保留说明，基线 445 passed） |
 
 ---
 

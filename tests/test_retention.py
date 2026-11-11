@@ -24,6 +24,7 @@ def _write_config(config_dir: Path) -> None:
         },
         "state": {"retention_days": 90},
         "audit": {"retention_days": 365},
+        "commands": {"retention_days": 180},
         "api": {"token": ""},
     }
     devices = {"rooms": [{"name": "bedroom", "display_name": "卧室", "sort_order": 1}]}
@@ -79,6 +80,20 @@ def _seed_history(db_path: Path) -> None:
             """,
             (recent,),
         )
+        conn.execute(
+            """
+            INSERT INTO command_requests(request_id, device_id, function_id, command, status, trace_id, created_at, updated_at)
+            VALUES ('cmd_old', 'dev_old', 'fn', 'toggle', 'sent', 't-old', ?, ?)
+            """,
+            (OLD, OLD),
+        )
+        conn.execute(
+            """
+            INSERT INTO command_requests(request_id, device_id, function_id, command, status, trace_id, created_at, updated_at)
+            VALUES ('cmd_new', 'dev_old', 'fn', 'toggle', 'sent', 't-new', ?, ?)
+            """,
+            (recent, recent),
+        )
 
 
 def test_retention_purges_only_rows_older_than_cutoff(tmp_path):
@@ -91,9 +106,28 @@ def test_retention_purges_only_rows_older_than_cutoff(tmp_path):
     with context.db.reader() as conn:
         states = conn.execute("SELECT id FROM device_states ORDER BY id").fetchall()
         audits = conn.execute("SELECT action FROM audit_logs ORDER BY id").fetchall()
+        commands = conn.execute(
+            "SELECT request_id FROM command_requests ORDER BY request_id"
+        ).fetchall()
 
     assert [row["id"] for row in states] == ["st_new"]
     assert [row["action"] for row in audits] == ["new.control"]
+    assert [row["request_id"] for row in commands] == ["cmd_new"]
+
+
+def test_retention_defaults_command_days_to_180(tmp_path):
+    config_dir = tmp_path / "config"
+    _write_config(config_dir)
+    settings_path = config_dir / "settings.yaml"
+    raw = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
+    raw.pop("commands")
+    settings_path.write_text(
+        yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    context = build_context(config_dir, tmp_path / "data" / "test.db")
+
+    assert context.config.settings.command_retention_days == 180
 
 
 def test_retention_failure_does_not_block_startup(tmp_path, monkeypatch):
