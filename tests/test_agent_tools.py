@@ -18,11 +18,18 @@ from homelink_agent.agent import (  # noqa: E402
     HomeAgent,
     _looks_like_consent,
     _Pending,
+    _reply_text,
+    _tool_name,
     _turn_request_id,
     _unwrap,
 )  # noqa: E402
 from homelink_agent.audit import AuditLog  # noqa: E402
 from homelink_agent.config import load_settings  # noqa: E402
+from homelink_agent.intent_guard import (  # noqa: E402
+    requires_clarification,
+    requires_context_followup,
+    requires_state_query,
+)
 from homelink_agent.llm import OllamaError, to_ollama_tool  # noqa: E402
 from mcp import ClientSession  # noqa: E402
 
@@ -478,3 +485,235 @@ def test_granted_confirm_is_one_shot_and_audited(
         for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert events.count("confirm_granted") == 1
+
+
+# ---------------------------------------------------------------- 意图护栏
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "全都打开吧",
+        "帮我把家里所有东西关一下",
+        "全部关掉",
+        "一键关闭全屋",
+        "把所有灯和风扇一次关掉",
+        "太热了",
+        "来点风",
+        "有点闷",
+        "空气不好",
+    ],
+)
+def test_requires_clarification_blocks_global_and_vague(text: str) -> None:
+    assert requires_clarification(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "把卧室风扇关掉",
+        "打开卧室风扇",
+        "风扇风速调大一档",
+        "切换一下风扇模式",
+        "同意",
+        "确认",
+        "执行睡觉场景",
+        "太热了，打开卧室空调",
+    ],
+)
+def test_requires_clarification_allows_specific_commands(text: str) -> None:
+    assert requires_clarification(text) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "风扇现在什么模式？",
+        "卧室风扇现在开着吗？",
+        "你确定风扇现在开着吗",
+        "刚才那下打开成功了吗",
+        "风扇现在几档",
+        "空调关了没",
+        "我开的那个码发对了吗",
+        "你刚才到底发出去没有",
+    ],
+)
+def test_requires_state_query_detects_questions(text: str) -> None:
+    assert requires_state_query(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "把风扇关掉",
+        "打开卧室风扇",
+        "风扇风速调大一档",
+        "切换一下风扇模式",
+        "同意",
+    ],
+)
+def test_requires_state_query_ignores_plain_controls(text: str) -> None:
+    assert requires_state_query(text) is False
+
+
+def test_tool_name_survives_bad_tool_call_shape() -> None:
+    assert _tool_name({"function": {"name": "home_find_devices"}}) == "home_find_devices"
+    assert _tool_name({}) == ""
+    assert _tool_name({"function": {}}) == ""
+
+
+def test_reply_text_handles_missing_content() -> None:
+    assert _reply_text({"content": " 好 "}) == "好"
+    assert _reply_text({}) == ""
+
+
+def test_respond_forces_clarification_without_tools() -> None:
+    calls: list[list[dict[str, Any]]] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        calls.append(tools)
+        return {"content": "请问要操作哪台设备？"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _RecordingSession()
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "全都打开吧")
+    )
+
+    assert reply == "请问要操作哪台设备？"
+    assert calls == [[]]  # 护栏触发时不给模型任何工具
+    assert session.calls == []  # 没有真实工具调用
+
+
+def test_respond_nudges_state_query_after_find_devices() -> None:
+    turns: list[list[dict[str, Any]]] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        turns.append([dict(item) for item in messages])
+        index = len(turns)
+        if index == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "home_find_devices", "arguments": {"room": "bedroom"}}}
+                ],
+            }
+        if index == 2:
+            return {"content": "风扇是 unknown"}  # 只查列表就回答：应被拦截
+        if index == 3:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "home_get_device_state",
+                            "arguments": {"device_id": "dev_1"},
+                        }
+                    }
+                ],
+            }
+        return {"content": "状态是 unknown"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _RecordingSession()
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "风扇现在什么模式？")
+    )
+
+    assert reply == "状态是 unknown"
+    assert [name for name, _ in session.calls] == ["home_find_devices", "home_get_device_state"]
+    assert any(
+        item.get("role") == "system" and "home_get_device_state" in str(item.get("content"))
+        for item in turns[2]
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["再小一点", "再关小一点", "再大一档", "那个模式", "继续"],
+)
+def test_requires_context_followup_detects_anaphora(text: str) -> None:
+    assert requires_context_followup(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["把卧室风扇关掉", "打开卧室风扇", "风扇风速调大一档", "同意"],
+)
+def test_requires_context_followup_ignores_full_commands(text: str) -> None:
+    assert requires_context_followup(text) is False
+
+
+def test_respond_requires_context_for_followup_without_history() -> None:
+    calls: list[list[dict[str, Any]]] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        calls.append(tools)
+        return {"content": "请问要把哪台设备调小一点？"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _RecordingSession()
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "再小一点")
+    )
+
+    assert reply == "请问要把哪台设备调小一点？"
+    assert calls == [[]]
+    assert session.calls == []
+
+
+def test_respond_allows_followup_when_history_exists() -> None:
+    seen_tools: list[list[dict[str, Any]]] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        seen_tools.append(tools)
+        return {"content": "好的"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _RecordingSession()
+    history = [
+        {"role": "user", "content": "打开卧室风扇"},
+        {"role": "assistant", "content": "信号已发出"},
+    ]
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "再大一档", history)
+    )
+
+    assert reply == "好的"
+    assert seen_tools == [[{"type": "function"}]]  # 有历史时不强制澄清，正常给工具
+    assert session.calls == []
+
+
+def test_respond_forces_snapshot_when_model_ignores_state_nudge() -> None:
+    turns: list[int] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        turns.append(len(messages))
+        if len(turns) <= 2:
+            return {"content": "请问你指哪台设备？"}
+        return {"content": "根据全屋快照，风扇状态是 unknown。"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _RecordingSession()
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "我开的那个码发对了吗")
+    )
+
+    assert reply == "根据全屋快照，风扇状态是 unknown。"
+    assert [name for name, _ in session.calls] == ["home_get_home_snapshot"]
+    assert session.calls[0][1] == {}

@@ -15,8 +15,18 @@ from mcp.client.stdio import stdio_client
 
 from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings
+from homelink_agent.intent_guard import (
+    requires_clarification,
+    requires_context_followup,
+    requires_state_query,
+)
 from homelink_agent.llm import OllamaError, chat, to_ollama_tool
-from homelink_agent.prompt import SYSTEM_PROMPT, history_messages
+from homelink_agent.prompt import (
+    CLARIFY_INSTRUCTION,
+    STATE_QUERY_NUDGE,
+    SYSTEM_PROMPT,
+    history_messages,
+)
 from homelink_mcp.config import DEFAULT_ACTOR
 from mcp import ClientSession, StdioServerParameters
 
@@ -64,6 +74,19 @@ def _unwrap(group: BaseExceptionGroup) -> BaseException:
             return found
     leaf = group.exceptions[0]
     return _unwrap(leaf) if isinstance(leaf, BaseExceptionGroup) else leaf
+
+
+def _tool_name(call: dict[str, Any]) -> str:
+    """从模型返回的 tool_call 里取工具名，非法结构返回空串。"""
+
+    function = call.get("function") or {}
+    return str(function.get("name") or "")
+
+
+def _reply_text(message: dict[str, Any]) -> str:
+    """取模型回复文本；云端/本地返回结构可能省略 content。"""
+
+    return str(message.get("content") or "").strip()
 
 
 def _turn_request_id(turn_id: str, device_id: str, command: str) -> str:
@@ -141,12 +164,61 @@ class HomeAgent:
         messages.extend(history_messages(history or []))
         messages.append({"role": "user", "content": user_text})
 
+        # 确定性护栏：不依赖模型自觉。命中全局/模糊输入时本轮不进入工具循环。
+        clarify_only = requires_clarification(user_text) or (
+            not history and requires_context_followup(user_text)
+        )
+        needs_state_query = requires_state_query(user_text)
+        state_queried = False
+        state_nudged = False
+
         try:
+            if clarify_only:
+                messages.append({"role": "system", "content": CLARIFY_INSTRUCTION})
+                message = await self._chat(self._settings, messages, [])
+                reply = _reply_text(message) or "请说明要控制哪台设备，或确认要操作的范围。"
+                self._audit.write("clarify_forced", user=user_text, reply=reply[:200])
+                self._audit.write("turn_end", reply=reply)
+                return reply
+
             for _ in range(self._settings.max_steps):
                 message = await self._chat(self._settings, messages, tools)
                 calls = message.get("tool_calls") or []
                 if not calls:
-                    reply = str(message.get("content") or "").strip() or "（模型没有返回内容）"
+                    if needs_state_query and not state_queried:
+                        if not state_nudged:
+                            # 第一次：提醒模型必须查状态，再给一次机会。
+                            state_nudged = True
+                            messages.append({"role": "system", "content": STATE_QUERY_NUDGE})
+                            self._audit.write("state_query_nudged", user=user_text)
+                            continue
+                        # 第二次仍不查：运行时兜底拉一次全屋快照，保证回答有数据依据。
+                        synthetic = {
+                            "function": {
+                                "name": "home_get_home_snapshot",
+                                "arguments": {},
+                            }
+                        }
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": str(message.get("content") or ""),
+                                "tool_calls": [synthetic],
+                            }
+                        )
+                        state_queried = True
+                        self._audit.write("state_query_forced", user=user_text)
+                        messages.append(
+                            await self._call_tool(
+                                session,
+                                synthetic,
+                                previous_pending,
+                                turn_id,
+                                previous_pending_scene=previous_pending_scene,
+                            )
+                        )
+                        continue
+                    reply = _reply_text(message) or "（模型没有返回内容）"
                     self._audit.write("turn_end", reply=reply)
                     return reply
 
@@ -158,6 +230,8 @@ class HomeAgent:
                     }
                 )
                 for call in calls:
+                    if _tool_name(call) in {"home_get_device_state", "home_get_home_snapshot"}:
+                        state_queried = True
                     messages.append(
                         await self._call_tool(
                             session,
