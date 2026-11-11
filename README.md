@@ -130,5 +130,6 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 - [开发路线图](docs/roadmap.md)（执行层 → Agent 侧车的里程碑与验收口径）
 - [当前开发清单](docs/backlog.md)（下一阶段 backlog，唯一前向清单）
 - [阶段执行记录](docs/roadmap-next.md)（P0–P3 已完成，已归档）
+- [单 Agent MVP 交接说明](docs/handoff-mvp.md)（L3–L6 收口任务）
 
 **验证边界**：后端仅在 mock 下跑通全量测试；Vue 前端已构建并由后端同源托管（不做 UI 自动化测试）；真实板子只做过只读连通性确认（探测、实体读取），**从未发送真实红外**。
