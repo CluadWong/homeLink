@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -58,6 +60,155 @@ def test_cron_month_end_and_leap_day() -> None:
     assert not cron_matches("0 0 31 * *", datetime(2026, 11, 30, 0, 0))
     assert cron_matches("0 0 29 2 *", datetime(2028, 2, 29, 0, 0))
     assert not cron_matches("0 0 29 2 *", datetime(2027, 2, 28, 0, 0))
+
+
+_FIELD_BOUNDS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+
+
+def _random_field(rng: random.Random, lo: int, hi: int) -> str:
+    """随机生成一段合法 cron 字段，覆盖 *、单元、范围、步长与列表。"""
+
+    kind = rng.choice(("star", "single", "range", "step", "range_step", "single_step", "list"))
+    if kind == "star":
+        return "*"
+    if kind == "single":
+        return str(rng.randint(lo, hi))
+    if kind == "range":
+        start = rng.randint(lo, hi - 1)
+        return f"{start}-{rng.randint(start + 1, hi)}"
+    if kind == "step":
+        return f"*/{rng.randint(1, hi - lo + 1)}"
+    if kind == "range_step":
+        start = rng.randint(lo, hi - 1)
+        end = rng.randint(start + 1, hi)
+        return f"{start}-{end}/{rng.randint(1, end - start)}"
+    if kind == "single_step":
+        start = rng.randint(lo, hi)
+        return f"{start}/{rng.randint(1, hi - start + 1)}"
+    return ",".join(str(rng.randint(lo, hi)) for _ in range(rng.randint(2, 3)))
+
+
+def _random_cron(rng: random.Random) -> str:
+    return " ".join(_random_field(rng, lo, hi) for lo, hi in _FIELD_BOUNDS)
+
+
+@lru_cache(maxsize=256)
+def _reference_expand(piece: str, lo: int, hi: int) -> set[int]:
+    """参考实现：逐段展开，刻意不复用被测代码的 `_expand`。"""
+
+    if "," in piece:
+        values: set[int] = set()
+        for single in piece.split(","):
+            values |= _reference_expand(single, lo, hi)
+        return values
+    step = 1
+    base = piece
+    if "/" in piece:
+        base, _, step_text = piece.partition("/")
+        step = int(step_text)
+    if base == "*":
+        start, end = lo, hi
+    elif "-" in base:
+        head, _, tail = base.partition("-")
+        start, end = int(head), int(tail)
+    else:
+        start = int(base)
+        end = hi if "/" in piece else start
+    return set(range(start, end + 1, step))
+
+
+def _reference_matches(expression: str, moment: datetime) -> bool:
+    """参考实现：直接用集合包含判断，日与周按标准 cron 的 OR 语义。"""
+
+    fields = expression.split()
+    minute, hour, day, month, weekday = (
+        _reference_expand(field, lo, hi)
+        for field, (lo, hi) in zip(fields, _FIELD_BOUNDS, strict=True)
+    )
+    weekday = {0 if value == 7 else value for value in weekday}
+    if moment.minute not in minute or moment.hour not in hour or moment.month not in month:
+        return False
+    day_ok = moment.day in day
+    weekday_ok = moment.isoweekday() % 7 in weekday
+    if fields[2].strip() == "*" or fields[4].strip() == "*":
+        return day_ok and weekday_ok
+    return day_ok or weekday_ok
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_cron_matches_reference_on_random_expressions(seed: int) -> None:
+    """随机表达式 × 随机时刻，与参考实现逐点比对。"""
+
+    rng = random.Random(seed)
+    origin = datetime(2026, 1, 1)
+    for _ in range(8):
+        expression = _random_cron(rng)
+        validate_cron(expression)
+        for _ in range(200):
+            moment = origin + timedelta(
+                days=rng.randint(0, 1095),  # 覆盖 2026-2028，含月末与闰日
+                minutes=rng.randint(0, 24 * 60 - 1),
+            )
+            assert cron_matches(expression, moment) == _reference_matches(expression, moment), (
+                expression,
+                moment.isoformat(),
+            )
+
+
+def test_cron_reference_agrees_over_full_week() -> None:
+    """固定表达式扫满一周逐分钟比对，避免随机采样漏掉边界。"""
+
+    rng = random.Random(20261111)
+    base = datetime(2026, 12, 28, 0, 0)  # 周一，跨到 2027-01
+    for _ in range(3):
+        expression = _random_cron(rng)
+        for offset in range(7 * 24 * 60):
+            moment = base + timedelta(minutes=offset)
+            assert cron_matches(expression, moment) == _reference_matches(expression, moment), (
+                expression,
+                moment.isoformat(),
+            )
+
+
+def test_cron_sunday_alias_is_equivalent() -> None:
+    """周字段 0 与 7 都必须表示周日。"""
+
+    rng = random.Random(7)
+    for expression in ("0 8 * * 0", "*/30 6-9 * * 0", "0 0 1 * 0"):
+        alias = expression[:-1] + "7"
+        for _ in range(200):
+            moment = datetime(2026, 1, 1) + timedelta(
+                days=rng.randint(0, 365), minutes=rng.randint(0, 24 * 60 - 1)
+            )
+            assert cron_matches(expression, moment) == cron_matches(alias, moment)
+
+
+def test_cron_step_equals_explicit_multiples() -> None:
+    """`*/n` 与显式列举等价，`a/n` 从 a 起按步长到上界。"""
+
+    assert cron_matches("*/7 * * * *", datetime(2026, 11, 11, 9, 0))
+    assert cron_matches("*/7 * * * *", datetime(2026, 11, 11, 9, 56))
+    assert not cron_matches("*/7 * * * *", datetime(2026, 11, 11, 9, 57))
+    assert cron_matches("45/5 * * * *", datetime(2026, 11, 11, 9, 55))
+    assert not cron_matches("45/5 * * * *", datetime(2026, 11, 11, 9, 44))
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "61 * * * *",
+        "* 25 * * *",
+        "0 0 32 * *",
+        "0 0 * 0 *",
+        "0 0 * * 9",
+        "10-5 * * * *",
+        "1,,2 * * * *",
+        "* * * * * *",
+    ],
+)
+def test_cron_rejects_out_of_range_random_like_input(expression: str) -> None:
+    with pytest.raises(ValueError):
+        cron_matches(expression, datetime(2026, 11, 11, 9, 0))
 
 
 @pytest.mark.parametrize(

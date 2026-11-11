@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`8ae085a`，445 passed，schema v3
+> 当前基线：`e1972d6`，468 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -33,10 +33,10 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `445 passed` |
+| pytest | `468 passed` |
 | ruff | `All checks passed` |
-| black | `116 files unchanged` |
-| mypy | `Success: no issues found in 116 source files` |
+| black | `117 files unchanged` |
+| mypy | `Success: no issues found in 117 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -162,9 +162,11 @@
   - 内容：Playwright 覆盖列表、创建、编辑、执行、结果弹层
   - 验收：关键路径可一键运行，最好进入 CI
 
-- [ ] **D2 cron 属性测试**
-  - 内容：`*`、`a-b`、`*/n`、列表、周日 0/7、跨天、月末
-  - 验收：随机表达式与参考实现比对
+- [x] **D2 cron 属性测试**
+  - 完成：2026-11-11
+  - 实现：`tests/test_scheduler.py` 新增独立参考实现（`_reference_expand` / `_reference_matches`，不复用被测 `_expand`），随机生成 `*`、单元、`a-b`、`*/n`、`a-b/n`、`a/n`、逗号列表共 7 类字段
+  - 测试：新增 23 条——随机表达式 × 随机时刻 12 组各 200 点比对、3 条随机表达式扫满一周（跨月，2026-12-28 起）逐分钟比对、周日 0/7 等价、`*/n` 与 `a/n` 步长语义、9 条越界/畸形输入拒绝
+  - 验收：属性测试与参考实现 0 分歧；全量 468 passed
 
 - [ ] **D3 评测常态化**
   - 内容：130 条云端评测定期跑（发版前或每周）
@@ -302,6 +304,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 C2（`agent.db` 用 `PRAGMA user_version` 版本化，基线 440 passed） |
 | 2026-11-11 | 完成 C3（时区口径写入 README + 边界测试）、C4（daemon 单实例文件锁，基线 444 passed） |
 | 2026-11-11 | 完成 C6（`command_requests` 保留期 180 天）、C7（审计隐私与保留说明，基线 445 passed） |
+| 2026-11-11 | 完成 D2（cron 属性测试：随机表达式与参考实现比对 + 整周扫描，基线 468 passed） |
 
 ---
 
