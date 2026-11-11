@@ -2,13 +2,14 @@
 
 用法：
     python scripts/restore.py backups\\homelink-20261110-120000.db
+    python scripts/restore.py backups\\agent-20261110-120000.db      # 自动恢复为 data/agent.db
     python scripts/restore.py <备份文件> --force   # 现有库会先改名 .pre-restore-<时间戳>
 
 安全规则：
 - 恢复前先对备份文件做 integrity_check，坏备份直接拒绝，不动现有库。
 - 目标库存在时必须 --force；现有 .db 与 -wal 会改名保留（.pre-restore-*），-shm 可重建、直接删除。
-- 请先停止服务（管理员 PowerShell 运行 scripts\\service\\uninstall-service.ps1 或停任务），
-  Windows 下文件被占用时改名会失败，本身就是一层保护。
+- 请先停止服务（管理员 PowerShell 运行 scripts\\service\\uninstall-service.ps1 或停任务）；
+  恢复 agent 备份前同样先停常驻 Agent（`HomeLinkAgent` 任务），否则文件占用会让改名失败。
 """
 
 from __future__ import annotations
@@ -21,9 +22,13 @@ import time
 from pathlib import Path
 
 try:
-    from scripts.backup import _check_database, resolve_db_path
+    from scripts.backup import _check_database, resolve_agent_db_path, resolve_db_path
 except ImportError:  # 直接以 python scripts/restore.py 运行时，scripts 不在 sys.path 上
-    from backup import _check_database, resolve_db_path  # type: ignore[no-redef]
+    from backup import (  # type: ignore[no-redef]
+        _check_database,
+        resolve_agent_db_path,
+        resolve_db_path,
+    )
 
 
 def restore_db(backup_file: Path, db_path: Path, force: bool) -> Path | None:
@@ -70,10 +75,21 @@ def main() -> int:
     parser.add_argument(
         "--db", type=Path, default=None, help="默认取 HOMELINK_DB_PATH 或 data/homelink.db"
     )
+    parser.add_argument(
+        "--agent-db",
+        type=Path,
+        default=None,
+        help="agent 备份的目标库，默认取 AGENTD_DB_PATH 或 data/agent.db",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
-    db_path = args.db if args.db is not None else resolve_db_path()
+    if args.db is not None:
+        db_path = args.db
+    elif args.backup_file.name.startswith("agent-"):
+        db_path = args.agent_db if args.agent_db is not None else resolve_agent_db_path()
+    else:
+        db_path = resolve_db_path()
     try:
         renamed = restore_db(args.backup_file, db_path, args.force)
     except (FileNotFoundError, RuntimeError, sqlite3.Error, OSError) as exc:

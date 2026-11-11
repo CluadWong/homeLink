@@ -46,14 +46,15 @@ powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 ### 备份与日志轮转
 
 ```powershell
-python scripts\backup.py                  # 在线快照 data\homelink.db 到 backups\，保留最近 7 份
+python scripts\backup.py                  # 在线快照 data\homelink.db 与 data\agent.db 到 backups\，各自保留最近 7 份
 python scripts\restore.py backups\homelink-20261110-142437.db --force   # 先停服务；旧库改名 .pre-restore-* 保留
+python scripts\restore.py backups\agent-20261110-142437.db --force      # 恢复定时计划；先停 HomeLinkAgent
 python scripts\rotate_logs.py             # logs\ 下超 5 MB 的 .log/.jsonl 滚动，保留 3 份
 ```
 
 - 备份用 SQLite 在线快照，**服务不用停**；备份后自动做 integrity_check，坏文件不留。
-- 学码数据全在库里，`install-service.ps1` 已注册 `HomeLinkBackup` 每天 03:00 自动备份（保留 7 份）；手动跑 `backup.py` 也随时可用，`--keep` 控制保留份数。
-- 恢复前先停服务；脚本会先校验备份、恢复后复检，坏备份直接拒绝且不动现有库。
+- 学码数据在 `homelink.db`，定时计划在 `agent.db`；`install-service.ps1` 已注册 `HomeLinkBackup` 每天 03:00 同时备份两者（各保留 7 份），手动跑 `backup.py` 也随时可用，`--keep` 控制保留份数。agent 库不存在时自动跳过，加 `--skip-agent` 可只备份主库。
+- 恢复前先停服务（agent 备份先停 `HomeLinkAgent`）；脚本会先校验备份、恢复后复检，坏备份直接拒绝且不动现有库。
 
 
 ## 配置

@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`8ae085a`，434 passed，schema v3
+> 当前基线：`8ae085a`，438 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -33,7 +33,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `434 passed` |
+| pytest | `438 passed` |
 | ruff | `All checks passed` |
 | black | `116 files unchanged` |
 | mypy | `Success: no issues found in 116 source files` |
@@ -76,9 +76,10 @@
 
 > 目标：把「mock 下通过」升级为「真机上可信」。每条都要记录日期、设备、结果、是否人眼确认。
 
-- [ ] **B1 真机只读复核**
-  - 内容：网关探测、设备列表、能力列表、状态查询
-  - 验收：记录板子地址与结果；不发送红外
+- [x] **B1 真机只读复核**
+  - 完成：2026-11-11 19:10（未发送任何红外）
+  - 验收：`GET /api/gateway` → `mode=real`、`base_url=http://192.168.10.3`、`reachable=true`、`latency_ms=327`；`/api/health` → `schema_version=3`；`/api/agent/capabilities` → 6 个能力（风扇 `dev_56b875c8`）；设备 2 台（风扇、空调，均 `risk_level=low`）；`/api/state` 两台均 `unknown`
+  - 备注：`command_requests` 未新增
 
 - [ ] **B2 真机单设备控制（需用户明确同意）**
   - 内容：选一个低风险设备，执行一次已学码功能
@@ -105,10 +106,11 @@
 
 > 背景：场景 v3、调度器、执行记录都是近期新增，功能可用但运维面尚未补齐。
 
-- [ ] **C1 `data/agent.db` 纳入备份与恢复**
-  - 现状：`scripts/backup.py` 只备份 `homelink.db`
-  - 动作：增加 `--agent-db` 或独立 `scripts/backup_agent.py`；`restore.py` 同步支持
-  - 验收：备份后删除 `agent.db`，恢复后定时计划仍在
+- [x] **C1 `data/agent.db` 纳入备份与恢复**
+  - 完成：2026-11-11
+  - 实现：`scripts/backup.py` 默认同时备份 `homelink.db` 与 `agent.db`（`agent-<时间戳>.db`，两前缀各自裁剪），新增 `--agent-db` / `--skip-agent`；`scripts/restore.py` 按文件名 `agent-` 自动恢复为 `AGENTD_DB_PATH` 或 `data/agent.db`
+  - 测试：`tests/test_backup_restore.py` 新增 4 条（agent 备份→删库→恢复数据仍在、库不存在返回 None、两前缀裁剪互不影响、CLI 自动目标）
+  - 验收：对真实运行中的库执行 `backup.py --output-dir <临时目录>`，`agent-*.db` 完整性 `ok` 且 `schedules` 表可读；单测覆盖「备份后删除 agent.db，恢复后数据仍在」；全量 438 passed
 
 - [ ] **C2 `agent.db` schema 版本化**
   - 现状：`ScheduleStore` 用零散 `ALTER TABLE` 补列
@@ -284,6 +286,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 建立本清单；roadmap-next.md 归档为执行记录；新增 L 组并完成 L1/L2 |
 | 2026-11-11 | 完成 L3（87.7%，按用户调整的 80% 口径达标）、L4（高风险确认闸门 0 误发）、L5（真机控制/场景/定时冒烟）、L6（三份文档口径统一） |
 | 2026-11-11 | 完成 A1–A5：基线改为 434 passed / schema v3，真机口径四份文档统一，验收清单补 P3 新面（§9），文档链接 0 失效 |
+| 2026-11-11 | 完成 B1（真机只读复核，未发红外）、C1（`agent.db` 纳入备份与恢复，基线 438 passed） |
 
 ---
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,55 @@ def test_backup_creates_verified_snapshot_and_prunes(tmp_path: Path) -> None:
 def test_backup_missing_db_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         backup_mod.backup_db(tmp_path / "nope.db", tmp_path / "out", keep=1)
+
+
+def test_backup_agent_db_roundtrip_keeps_schedules(tmp_path: Path) -> None:
+    agent_db = tmp_path / "agent.db"
+    _make_db(agent_db, "schedule-1")
+    out = tmp_path / "backups"
+
+    target = backup_mod.backup_agent_db(agent_db, out, keep=2)
+
+    assert target is not None
+    assert target.name.startswith("agent-")
+    assert _read_marker(target) == "schedule-1"
+    agent_db.unlink()  # 模拟 agent.db 丢失
+    restore_mod.restore_db(target, agent_db, force=True)
+    assert _read_marker(agent_db) == "schedule-1"
+
+
+def test_backup_agent_db_missing_returns_none(tmp_path: Path) -> None:
+    assert backup_mod.backup_agent_db(tmp_path / "none.db", tmp_path / "out", keep=1) is None
+    assert not (tmp_path / "out").exists()
+
+
+def test_prune_backups_keeps_prefixes_separate(tmp_path: Path) -> None:
+    out = tmp_path / "backups"
+    out.mkdir()
+    for i in range(3):
+        (out / f"homelink-2026010{i}-000000.db").write_bytes(b"old")
+    (out / "agent-20260101-000000.db").write_bytes(b"agent")
+
+    backup_mod.prune_backups(out, keep=1, prefix="agent")
+
+    assert len(list(out.glob("homelink-*.db"))) == 3
+    assert len(list(out.glob("agent-*.db"))) == 1
+
+
+def test_restore_agent_backup_from_cli_targets_agent_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_db = tmp_path / "agent.db"
+    _make_db(agent_db, "schedule-2")
+    target = backup_mod.backup_agent_db(agent_db, tmp_path / "backups", keep=1)
+    assert target is not None
+    agent_db.unlink()
+
+    monkeypatch.setenv("AGENTD_DB_PATH", str(agent_db))
+    monkeypatch.setattr(sys, "argv", ["restore.py", str(target)])
+
+    assert restore_mod.main() == 0
+    assert _read_marker(agent_db) == "schedule-2"
 
 
 def test_restore_roundtrip_with_force_and_wal_sidecar(tmp_path: Path) -> None:
