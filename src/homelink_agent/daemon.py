@@ -46,6 +46,8 @@ from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings, load_settings
 from homelink_agent.llm import OllamaError, to_ollama_tool, warm_model
 from homelink_agent.scheduler import (
+    LoadScenePlans,
+    SceneTriggerSchedule,
     Schedule,
     Scheduler,
     ScheduleStore,
@@ -82,24 +84,71 @@ class ScheduleRequest(BaseModel):
 SceneLookup = Callable[[str], Awaitable[dict[str, Any] | None]]
 
 
+async def _fetch_scenes(settings: AgentSettings) -> list[dict[str, Any]]:
+    """从后端读场景清单；调用方负责兜住网络错误。"""
+
+    headers = {"X-Actor": DEFAULT_ACTOR}
+    if settings.homelink_token:
+        headers["Authorization"] = f"Bearer {settings.homelink_token}"
+    async with httpx.AsyncClient(base_url=settings.homelink_base_url, timeout=10.0) as client:
+        response = await client.get("/api/agent/scenes", headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+    scenes = (payload.get("result") or {}).get("scenes") or []
+    return [scene for scene in scenes if isinstance(scene, dict)]
+
+
+def _scene_by_id(scenes: list[dict[str, Any]], scene_id: str) -> dict[str, Any] | None:
+    """按 scene_id 匹配；兼容旧字段 id。"""
+
+    for scene in scenes:
+        if scene.get("scene_id") == scene_id or scene.get("id") == scene_id:
+            return scene
+    return None
+
+
+def _plans_from_scenes(scenes: list[dict[str, Any]]) -> list[SceneTriggerSchedule]:
+    """把场景里已启用的 schedule 触发器转成本地计划；cron 不合法的直接跳过。"""
+
+    plans: list[SceneTriggerSchedule] = []
+    for scene in scenes:
+        scene_id = scene.get("scene_id") or scene.get("id")
+        if not isinstance(scene_id, str) or not scene.get("enabled", True):
+            continue
+        for trigger in scene.get("triggers") or []:
+            if not isinstance(trigger, dict):
+                continue
+            if trigger.get("type") != "schedule" or not trigger.get("enabled", True):
+                continue
+            trigger_id = trigger.get("trigger_id")
+            config = trigger.get("config")
+            cron = config.get("cron") if isinstance(config, dict) else None
+            if not isinstance(trigger_id, str) or not isinstance(cron, str):
+                continue
+            try:
+                validate_cron(cron)
+            except ValueError:
+                continue
+            plans.append(SceneTriggerSchedule(scene_id=scene_id, trigger_id=trigger_id, cron=cron))
+    return plans
+
+
 def _backend_scene_lookup(settings: AgentSettings) -> SceneLookup:
     """默认从后端读场景清单，用来校验场景是否存在与是否含高风险设备。"""
 
     async def lookup(scene_id: str) -> dict[str, Any] | None:
-        headers = {"X-Actor": DEFAULT_ACTOR}
-        if settings.homelink_token:
-            headers["Authorization"] = f"Bearer {settings.homelink_token}"
-        async with httpx.AsyncClient(base_url=settings.homelink_base_url, timeout=10.0) as client:
-            response = await client.get("/api/agent/scenes", headers=headers)
-            response.raise_for_status()
-            payload = response.json()
-        scenes = (payload.get("result") or {}).get("scenes") or []
-        for scene in scenes:
-            if isinstance(scene, dict) and scene.get("id") == scene_id:
-                return scene
-        return None
+        return _scene_by_id(await _fetch_scenes(settings), scene_id)
 
     return lookup
+
+
+def _backend_scene_plans(settings: AgentSettings) -> LoadScenePlans:
+    """默认从后端读场景定时触发器，供调度器同步成本地计划。"""
+
+    async def load() -> list[SceneTriggerSchedule]:
+        return _plans_from_scenes(await _fetch_scenes(settings))
+
+    return load
 
 
 def _tool_text(result: Any) -> str:
@@ -298,8 +347,9 @@ def create_agent_app(
     *,
     start_scheduler: bool = True,
     scene_lookup: SceneLookup | None = None,
+    scene_plans: LoadScenePlans | None = None,
 ) -> FastAPI:
-    """connection/warmup/start_scheduler/scene_lookup 参数供测试注入；生产路径全走默认值。"""
+    """connection/warmup/start_scheduler/scene_lookup/scene_plans 参数供测试注入；生产路径全走默认值。"""
 
     own_connection = connection is None
     conn = connection if connection is not None else McpConnection(settings)
@@ -309,7 +359,8 @@ def create_agent_app(
     audit = AuditLog(settings.audit_path)
     schedules = ScheduleStore(settings.agent_db_path)
     lookup = scene_lookup or _backend_scene_lookup(settings)
-    scheduler = Scheduler(schedules, _schedule_runner(conn, lookup), audit=audit)
+    plans = scene_plans or _backend_scene_plans(settings)
+    scheduler = Scheduler(schedules, _schedule_runner(conn, lookup), audit=audit, sync=plans)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -322,6 +373,11 @@ def create_agent_app(
                 except OllamaError as exc:  # 预热失败不拦启动，首轮提问会给出同样报错
                     print(f"警告：{exc}", file=sys.stderr, flush=True)
         if start_scheduler:
+            # 启动先同步一次场景定时触发器；后端不可用不拦启动，等下一轮再试
+            try:
+                await scheduler.sync()
+            except Exception as exc:
+                audit.write("schedule_sync_error", error=f"{type(exc).__name__}: {exc}")
             task = asyncio.create_task(scheduler.run())
         try:
             yield

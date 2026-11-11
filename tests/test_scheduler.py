@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from homelink_agent.scheduler import (
+    SceneTriggerSchedule,
     Schedule,
     Scheduler,
     ScheduleStore,
@@ -151,3 +153,116 @@ def test_scheduler_does_not_rerun_same_minute_after_restart() -> None:
         store.close()
 
     assert runs == []
+
+
+def test_store_migrates_legacy_schedules_table(tmp_path: Path) -> None:
+    path = tmp_path / "agent.db"
+    legacy = sqlite3.connect(path)
+    legacy.execute(
+        "CREATE TABLE schedules (id TEXT PRIMARY KEY, scene_id TEXT NOT NULL,"
+        " cron TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,"
+        " confirm INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,"
+        " last_run_at TEXT, last_status TEXT, last_error TEXT)"
+    )
+    legacy.execute(
+        "INSERT INTO schedules(id, scene_id, cron, enabled, confirm, created_at)"
+        " VALUES ('old-1', 'scene-old', '0 7 * * *', 1, 0, '2026-11-01T07:00:00')"
+    )
+    legacy.commit()
+    legacy.close()
+
+    store = ScheduleStore(str(path))
+    try:
+        items = store.list_all()
+        assert [(item.id, item.source, item.trigger_id) for item in items] == [
+            ("old-1", "manual", None)
+        ]
+        store.sync_scene_triggers(
+            [SceneTriggerSchedule(scene_id="scene-1", trigger_id="tr-1", cron="0 8 * * *")]
+        )
+        assert {item.scene_id for item in store.list_all()} == {"scene-old", "scene-1"}
+    finally:
+        store.close()
+
+
+def test_sync_scene_triggers_adds_updates_and_removes() -> None:
+    store = ScheduleStore(":memory:")
+    manual = store.add(scene_id="scene-manual", cron="0 6 * * *", enabled=True, confirm=True)
+    try:
+        first = store.sync_scene_triggers(
+            [
+                SceneTriggerSchedule(scene_id="scene-1", trigger_id="tr-1", cron="0 7 * * *"),
+                SceneTriggerSchedule(scene_id="scene-1", trigger_id="tr-2", cron="0 8 * * *"),
+            ]
+        )
+        assert first == {"added": 2, "updated": 0, "removed": 0}
+
+        second = store.sync_scene_triggers(
+            [
+                SceneTriggerSchedule(
+                    scene_id="scene-1", trigger_id="tr-1", cron="0 9 * * *", enabled=False
+                )
+            ]
+        )
+        assert second == {"added": 0, "updated": 1, "removed": 1}
+
+        rows = {(row.scene_id, row.trigger_id): row for row in store.list_all()}
+        assert set(rows) == {("scene-manual", None), ("scene-1", "tr-1")}
+        assert rows[("scene-1", "tr-1")].cron == "0 9 * * *"
+        assert rows[("scene-1", "tr-1")].enabled is False
+        assert rows[("scene-manual", None)].confirm is True  # 手工计划不受同步影响
+
+        third = store.sync_scene_triggers([])
+        assert third == {"added": 0, "updated": 0, "removed": 1}
+        assert [row.scene_id for row in store.list_all()] == [manual.scene_id]
+    finally:
+        store.close()
+
+
+def test_sync_scene_triggers_keeps_last_run() -> None:
+    store = ScheduleStore(":memory:")
+    moment = datetime(2026, 11, 10, 7, 0)
+    try:
+        store.sync_scene_triggers(
+            [SceneTriggerSchedule(scene_id="scene-1", trigger_id="tr-1", cron="0 7 * * *")]
+        )
+        schedule = store.list_all()[0]
+        store.mark_run(schedule.id, status="ok", error=None, at=moment)
+
+        store.sync_scene_triggers(
+            [SceneTriggerSchedule(scene_id="scene-1", trigger_id="tr-1", cron="0 7 * * *")]
+        )
+        row = store.list_all()[0]
+        assert row.last_run_at == moment.isoformat(timespec="seconds")
+        assert row.last_status == "ok"
+    finally:
+        store.close()
+
+
+def test_scheduler_sync_skips_without_source_and_respects_interval() -> None:
+    store = ScheduleStore(":memory:")
+    calls: list[int] = []
+
+    async def runner(schedule: Schedule) -> None:
+        return None
+
+    async def plans() -> list[SceneTriggerSchedule]:
+        calls.append(1)
+        return [SceneTriggerSchedule(scene_id="scene-1", trigger_id="tr-1", cron="0 7 * * *")]
+
+    moment = datetime(2026, 11, 10, 7, 0)
+    try:
+        assert asyncio.run(Scheduler(store, runner).sync(moment)) is None
+
+        scheduler = Scheduler(store, runner, sync=plans, sync_seconds=300)
+        assert asyncio.run(scheduler.sync(moment)) == {"added": 1, "updated": 0, "removed": 0}
+        # 未到间隔：不发第二次请求
+        assert asyncio.run(scheduler.sync(datetime(2026, 11, 10, 7, 1))) is None
+        assert asyncio.run(scheduler.sync(datetime(2026, 11, 10, 7, 5))) == {
+            "added": 0,
+            "updated": 0,
+            "removed": 0,
+        }
+        assert len(calls) == 2
+    finally:
+        store.close()

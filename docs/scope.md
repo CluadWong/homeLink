@@ -28,7 +28,7 @@
 | 不做什么 | 归属 |
 | --- | --- |
 | 内置功能、能力（capability）、参数化控制、策略分级 | **本期放弃**：所有控制都是学码功能回放，不存能力表、不校验参数 |
-| 场景、定时、规则引擎、意图理解与多轮对话 | **场景已恢复并升级为编排层**：动作组按能力归组、目标设备运行时查能力、支持启用开关与触发器（manual / schedule / voice / device_state）落库；本期只有手动执行入口，定时由 Agent 侧调度器到点调用，自动化创建与规则引擎仍不做（`POST /api/agent/automations` 固定 `501 NOT_SUPPORTED`），对话与意图理解由上层智能管家实现 |
+| 场景、定时、规则引擎、意图理解与多轮对话 | **场景已恢复并升级为编排层**：动作组按能力归组、目标设备运行时查能力、支持启用开关与触发器（manual / schedule / voice / device_state）落库；手动入口走 `POST /api/agent/scenes/{id}/run`，`schedule` 触发器由 Agent 侧调度器每 5 分钟同步成计划后到点调用，`voice` / `device_state` 触发器仍等外部入口命中；自动化创建与规则引擎仍不做（`POST /api/agent/automations` 固定 `501 NOT_SUPPORTED`），对话与意图理解由上层智能管家实现 |
 | 温湿度等传感器 | **本期不接入**：`/api/state` 明确返回 `available=false` 与 `null`，界面显示「未接入」 |
 | 用户体系与鉴权 | 单用户本地部署，暂不需要 |
 | 正式前端 | 已完成：Vue 前端在 `frontend/` 实现，`frontend/dist` 构建通过并由后端同源托管，契约见 `frontend-contract.md`；Streamlit 保留但不参与启动 |

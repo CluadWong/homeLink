@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS schedules (
     created_at  TEXT NOT NULL,
     last_run_at TEXT,
     last_status TEXT,
-    last_error  TEXT
+    last_error  TEXT,
+    source      TEXT NOT NULL DEFAULT 'manual',
+    trigger_id  TEXT
 )
 """
 
@@ -49,9 +51,22 @@ class Schedule:
     last_run_at: str | None = None
     last_status: str | None = None
     last_error: str | None = None
+    source: str = "manual"
+    trigger_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SceneTriggerSchedule:
+    """后端场景里的一个定时触发器，同步成本地计划后由调度器到点执行。"""
+
+    scene_id: str
+    trigger_id: str
+    cron: str
+    enabled: bool = True
 
 
 RunScene = Callable[[Schedule], Awaitable[None]]
+LoadScenePlans = Callable[[], Awaitable[list[SceneTriggerSchedule]]]
 
 
 def _row_to_schedule(row: sqlite3.Row) -> Schedule:
@@ -65,6 +80,8 @@ def _row_to_schedule(row: sqlite3.Row) -> Schedule:
         last_run_at=None if row["last_run_at"] is None else str(row["last_run_at"]),
         last_status=None if row["last_status"] is None else str(row["last_status"]),
         last_error=None if row["last_error"] is None else str(row["last_error"]),
+        source=str(row["source"]),
+        trigger_id=None if row["trigger_id"] is None else str(row["trigger_id"]),
     )
 
 
@@ -79,7 +96,19 @@ class ScheduleStore:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.execute(_SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """旧库没有 source / trigger_id：补列，已有手工计划视为 source='manual'。"""
+
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(schedules)")}
+        if "source" not in columns:
+            self._conn.execute(
+                "ALTER TABLE schedules ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
+            )
+        if "trigger_id" not in columns:
+            self._conn.execute("ALTER TABLE schedules ADD COLUMN trigger_id TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -137,6 +166,53 @@ class ScheduleStore:
                 (at.isoformat(timespec="seconds"), status, error, schedule_id),
             )
             self._conn.commit()
+
+    def sync_scene_triggers(self, desired: list[SceneTriggerSchedule]) -> dict[str, int]:
+        """把后端场景的定时触发器对齐到本地计划表。
+
+        - 以 `(scene_id, trigger_id)` 为幂等键，只动 `source='scene'` 的行；
+        - 新增 / 改 cron 或 enabled / 删除已消失的触发器；
+        - 已存在行的 `last_run_at` 保留，避免同步把「同一分钟已执行」抹掉。
+        """
+
+        added = updated = removed = 0
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM schedules WHERE source = 'scene'").fetchall()
+            existing = {
+                (str(row["scene_id"]), str(row["trigger_id"])): row
+                for row in rows
+                if row["trigger_id"] is not None
+            }
+            wanted = {(item.scene_id, item.trigger_id): item for item in desired}
+            for key, item in wanted.items():
+                row = existing.get(key)
+                if row is None:
+                    self._conn.execute(
+                        "INSERT INTO schedules"
+                        "(id, scene_id, cron, enabled, confirm, created_at, source, trigger_id)"
+                        " VALUES (?, ?, ?, ?, 0, ?, 'scene', ?)",
+                        (
+                            uuid.uuid4().hex[:12],
+                            item.scene_id,
+                            item.cron,
+                            int(item.enabled),
+                            datetime.now().isoformat(timespec="seconds"),
+                            item.trigger_id,
+                        ),
+                    )
+                    added += 1
+                elif str(row["cron"]) != item.cron or bool(row["enabled"]) != item.enabled:
+                    self._conn.execute(
+                        "UPDATE schedules SET cron = ?, enabled = ? WHERE id = ?",
+                        (item.cron, int(item.enabled), str(row["id"])),
+                    )
+                    updated += 1
+            for key, row in existing.items():
+                if key not in wanted:
+                    self._conn.execute("DELETE FROM schedules WHERE id = ?", (str(row["id"]),))
+                    removed += 1
+            self._conn.commit()
+        return {"added": added, "updated": updated, "removed": removed}
 
 
 class CronExpression(NamedTuple):
@@ -223,7 +299,11 @@ def cron_matches(expression: str, moment: datetime) -> bool:
 
 
 class Scheduler:
-    """后台循环：每分钟最多检查一次，命中且未执行过就调用 runner。"""
+    """后台循环：每分钟最多检查一次，命中且未执行过就调用 runner。
+
+    `sync` 非空时，按 `sync_seconds` 间隔把后端场景的定时触发器同步到本地计划表；
+    同步失败只记审计，不影响已有计划的执行。
+    """
 
     def __init__(
         self,
@@ -233,24 +313,47 @@ class Scheduler:
         tick_seconds: float = 20.0,
         audit: AuditLog | None = None,
         clock: Callable[[], datetime] = datetime.now,
+        sync: LoadScenePlans | None = None,
+        sync_seconds: float = 300.0,
     ) -> None:
         self._store = store
         self._runner = runner
         self._tick = tick_seconds
         self._audit = audit
         self._clock = clock
+        self._sync = sync
+        self._sync_seconds = sync_seconds
+        self._last_sync: datetime | None = None
         self._last_minute: str | None = None
 
     async def run(self) -> None:
         while True:
             await asyncio.sleep(self._tick)
             try:
+                await self.sync()
                 await self.tick()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # 单次检查失败不能让调度线程退出
                 if self._audit is not None:
                     self._audit.write("schedule_tick_error", error=str(exc))
+
+    async def sync(self, now: datetime | None = None) -> dict[str, int] | None:
+        """按间隔拉取场景定时触发器；未到间隔或未配置来源时返回 None。"""
+
+        if self._sync is None:
+            return None
+        moment = now or self._clock()
+        if (
+            self._last_sync is not None
+            and (moment - self._last_sync).total_seconds() < self._sync_seconds
+        ):
+            return None
+        result = self._store.sync_scene_triggers(await self._sync())
+        self._last_sync = moment
+        if any(result.values()) and self._audit is not None:
+            self._audit.write("schedule_synced", **result)
+        return result
 
     async def tick(self, now: datetime | None = None) -> list[dict[str, Any]]:
         moment = (now or self._clock()).replace(second=0, microsecond=0)

@@ -593,6 +593,22 @@ jobs:
 - 测试：`tests/test_agent_api.py` 覆盖动作组 CRUD、能力过滤、停用拒绝、缺能力/离线
   partial、触发器校验；`tests/test_schema.py` 覆盖 v2 → v3 迁移
 
+**场景定时触发器接入调度器（2026-11-11）**：
+
+- 修复 `_backend_scene_lookup` 用 `scene.get("id")` 匹配、实际字段是 `scene_id`
+  导致 daemon 建计划恒返回 404 的问题；抽出 `_scene_by_id` 纯函数并补测试
+- `ScheduleStore` 增加 `source / trigger_id` 两列（旧库自动 `ALTER TABLE` 补列，
+  已有手工计划视为 `source='manual'`），新增 `sync_scene_triggers()`：
+  以 `(scene_id, trigger_id)` 为幂等键增 / 改 / 删，保留 `last_run_at`
+- `Scheduler` 增加 `sync` 来源与 `sync_seconds`（默认 300 秒）间隔；启动先同步一次，
+  后端不可用只写 `schedule_sync_error` 审计、不拦启动
+- daemon 从后端场景清单提取**已启用场景 + 已启用 schedule 触发器**生成计划；
+  停用场景 / 停用触发器即从计划表移除；cron 不合法的触发器跳过
+- 同步生成的计划 `confirm` 恒为 `false`：高风险场景到点仍被 `_schedule_runner` 拦下
+  并记 `schedule_error`，不会绕过确认
+- 测试：`tests/test_scheduler.py`（旧库迁移、增删改、保留 last_run、间隔与未配置来源）、
+  `tests/test_daemon.py`（scene_id 匹配、触发器过滤、启动同步落到 `/api/schedules`）
+
 ---
 
 ## 7. P4：可选能力

@@ -19,11 +19,13 @@ from homelink_agent.daemon import (
     McpConnection,
     Metrics,
     SessionStore,
+    _plans_from_scenes,
+    _scene_by_id,
     _schedule_runner,
     create_agent_app,
 )
 from homelink_agent.llm import OllamaError
-from homelink_agent.scheduler import Schedule, ScheduleStore
+from homelink_agent.scheduler import SceneTriggerSchedule, Schedule, ScheduleStore
 from mcp import ClientSession
 
 
@@ -152,7 +154,12 @@ def test_health_reports_connection_and_sessions(
 def test_max_sessions_eviction_and_drop(
     fake_chat: list[list[dict[str, Any]]],
 ) -> None:
-    app = create_agent_app(_settings(max_sessions=1), connection=FakeConnection(), warmup=False)
+    app = create_agent_app(
+        _settings(max_sessions=1),
+        connection=FakeConnection(),
+        warmup=False,
+        start_scheduler=False,
+    )
 
     with TestClient(app) as client:
         first = client.post("/api/chat", json={"message": "一", "session_id": "s1"}).json()
@@ -580,3 +587,86 @@ def test_schedule_runner_fails_when_scene_disappeared() -> None:
         asyncio.run(runner(_schedule()))
 
     assert session.calls == []
+
+
+def test_scene_by_id_matches_backend_payload_field() -> None:
+    scenes = [
+        {"scene_id": "sc_1", "name": "离家", "enabled": True},
+        {"scene_id": "sc_2", "name": "回家", "enabled": True},
+    ]
+
+    assert _scene_by_id(scenes, "sc_2") is scenes[1]
+    assert _scene_by_id(scenes, "sc_missing") is None
+
+
+def test_plans_from_scenes_keeps_only_enabled_schedule_triggers() -> None:
+    scenes: list[dict[str, Any]] = [
+        {
+            "scene_id": "sc_1",
+            "enabled": True,
+            "triggers": [
+                {"trigger_id": "tr_manual", "type": "manual", "enabled": True, "config": {}},
+                {
+                    "trigger_id": "tr_ok",
+                    "type": "schedule",
+                    "enabled": True,
+                    "config": {"cron": "0 23 * * *"},
+                },
+                {
+                    "trigger_id": "tr_off",
+                    "type": "schedule",
+                    "enabled": False,
+                    "config": {"cron": "0 7 * * *"},
+                },
+                {
+                    "trigger_id": "tr_bad",
+                    "type": "schedule",
+                    "enabled": True,
+                    "config": {"cron": "0 25 * * *"},
+                },
+            ],
+        },
+        {
+            "scene_id": "sc_2",
+            "enabled": False,
+            "triggers": [
+                {
+                    "trigger_id": "tr_scene_off",
+                    "type": "schedule",
+                    "enabled": True,
+                    "config": {"cron": "0 8 * * *"},
+                }
+            ],
+        },
+    ]
+
+    assert _plans_from_scenes(scenes) == [
+        SceneTriggerSchedule(scene_id="sc_1", trigger_id="tr_ok", cron="0 23 * * *")
+    ]
+
+
+def test_startup_syncs_scene_triggers_into_schedule_table() -> None:
+    async def plans() -> list[SceneTriggerSchedule]:
+        return [
+            SceneTriggerSchedule(scene_id="sc_1", trigger_id="tr_ok", cron="0 23 * * *"),
+        ]
+
+    async def no_scene(scene_id: str) -> dict[str, Any] | None:
+        return None
+
+    app = create_agent_app(
+        _settings(),
+        connection=FakeConnection(),
+        warmup=False,
+        scene_lookup=no_scene,
+        scene_plans=plans,
+    )
+
+    with TestClient(app) as client:
+        schedules = client.get("/api/schedules").json()["schedules"]
+
+    assert [(item["scene_id"], item["trigger_id"], item["cron"]) for item in schedules] == [
+        ("sc_1", "tr_ok", "0 23 * * *")
+    ]
+    assert schedules[0]["source"] == "scene"
+    assert schedules[0]["confirm"] is False

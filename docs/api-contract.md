@@ -175,7 +175,7 @@
 - **重试策略：调用方不得自动重发。** `GATEWAY_TIMEOUT` 时信号可能已发出，自动重试会造成重复动作（风扇开关类为翻转语义）；`EXECUTION_FAILED / DEVICE_OFFLINE` 已明确未执行，可在用户重新确认后用**新的 `request_id`** 重发。重放旧 `request_id` 只会拿回原结果，不会再次发送。
 - **场景模型**：`{scene_id, name, enabled, action_groups, triggers, items, risk_level, contains_high_risk, created_at, updated_at}`。场景是编排层，设备是执行层，两者只通过 `capability` 解耦。
 - `action_groups` 1–20 组，每组 `{group_id, name, capability, targets:[{device_id, device_name, room, function_id, command}]}`。`capability` 即能力名（功能名），同能力设备可放入同一组；创建/更新时逐台校验设备确实具备该能力，不支持 → 404 `NOT_FOUND`（提示缺少哪项能力），不会静默收录。同一组内设备重复 → 400。
-- `triggers` 0–10 个策略对象 `{trigger_id, type, enabled, config}`。`type` 四值 `manual / schedule / voice / device_state`，`config` 按类型校验：`schedule` 需 5 段 `cron`，`voice` 需非空 `phrases` 列表，`device_state` 需 `device_id`；`manual` 无额外要求。创建时不传 `triggers` 自动补一个 `manual`。四种触发器互不依赖，本期只有手动执行入口（`/run`），其余类型落库后由各自的调度/语音/状态入口命中。
+- `triggers` 0–10 个策略对象 `{trigger_id, type, enabled, config}`。`type` 四值 `manual / schedule / voice / device_state`，`config` 按类型校验：`schedule` 需 5 段 `cron`，`voice` 需非空 `phrases` 列表，`device_state` 需 `device_id`；`manual` 无额外要求。创建时不传 `triggers` 自动补一个 `manual`。四种触发器互不依赖：`schedule` 由 Agent 侧调度器（daemon）每 5 分钟拉取场景清单后同步成本地计划，到点调用 `/run`；场景停用或触发器停用即视为撤销；`voice` / `device_state` 仍只落库，等待各自的语音 / 状态入口命中。
 - `items` 是兼容旧契约的**扁平只读视图**（按动作组 → 目标展平），创建时可继续用 `items`（每项 `{device_id, command}` 各自成组），但 `items` 与 `action_groups` 必须且只能提供一种，且不接受通过 PATCH 写入。
 - `PATCH` 至少要修改 `name / enabled / action_groups / triggers` 之一；`action_groups` / `triggers` 传入即整组替换，省略表示保持原样。
 - **执行是尽力而为的**：先校验 `enabled`（停用 → 400 `INVALID_REQUEST`，不产生任何命令记录）→ 逐动作组、逐 target 解析能力 → 单台下发。单设备失败或离线只影响它自己，**不存在事务式全成功/全回滚**。
