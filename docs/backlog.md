@@ -146,11 +146,13 @@
   - 实现：`config/settings.yaml` 新增 `commands.retention_days: 180`；`purge_retention` 启动时同时清理 `command_requests`；场景「最近执行」由 `command_requests` 派生，随同一保留期，不另建归档表
   - 测试：`test_retention_purges_only_rows_older_than_cutoff` 增加指令记录断言；新增 `test_retention_defaults_command_days_to_180`
   - 验收：三张表都有明确保留期（状态 90 / 审计 365 / 指令 180 天），长期运行数据库不再无限增长；口径写入 `settings.yaml` 注释
+  - 提交：`65458c5`
 
 - [x] **C7 审计隐私**
   - 完成：2026-11-11
   - 决策：不做自动脱敏（会破坏回溯价值），改为「访问与保留说明」：根 `README.md` 明确审计含用户原话、工具名与参数、确认结果，属敏感数据，只写本机、不落库、不外发
   - 保留：`rotate_logs.py` 已覆盖 `.jsonl`（默认保留 3 份）；不需要留痕时可直接删除 `logs/agent-audit.jsonl`，不影响运行
+  - 提交：`65458c5`
 
 ---
 
