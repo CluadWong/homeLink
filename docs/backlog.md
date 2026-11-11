@@ -120,18 +120,21 @@
   - 完成：2026-11-11
   - 实现：`scheduler.py` 引入 `AGENT_SCHEMA_VERSION = 1` 与 `PRAGMA user_version`；`v0` 旧库自动补 `source` / `trigger_id` 并升到 `v1`；版本高于当前支持时抛 `RuntimeError`（提示升级或恢复旧备份），并关闭连接
   - 测试：新增 `test_store_sets_user_version_on_create`、`test_store_rejects_newer_schema_version`；原迁移用例补充版本断言
+  - 提交：`af42eef`（与 C1 同一提交）
 
 - [x] **C3 调度时区显式化**
   - 完成：2026-11-11
   - 决策：不新增 `AGENTD_TZ`（Windows 下需额外 `tzdata` 包，收益低于成本）；在根 `README.md` 明确「按宿主机本地墙钟时间解释、分钟粒度、不做夏令时换算，改系统时区后需重启 daemon」
   - 测试：新增跨天/月末/闰日边界用例（`test_cron_crosses_midnight_and_month_boundaries`、`test_cron_month_end_and_leap_day`）
   - 验收：时区行为可预测，且与本机墙钟一致
+  - 提交：`f0511b5`
 
 - [x] **C4 单实例防重**
   - 完成：2026-11-11
   - 实现：新增 `src/homelink_agent/instance_lock.py`（Windows `msvcrt` / POSIX `fcntl` 文件锁）；`daemon.main()` 启动独占 `data/agent.db.lock`，第二个实例打印「已有 agentd 实例在运行」并以非 0 退出
   - 测试：`test_instance_lock_blocks_second_instance`、`test_instance_lock_release_is_idempotent`
   - 验收：进程退出自动释放锁，无陈旧锁文件；重复启动被拒绝
+  - 提交：`f0511b5`
 
 - [ ] **C5 调度失败可见性**
   - 现状：失败只写审计
