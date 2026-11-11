@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`8ae085a`，438 passed，schema v3
+> 当前基线：`8ae085a`，440 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -33,7 +33,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `438 passed` |
+| pytest | `440 passed` |
 | ruff | `All checks passed` |
 | black | `116 files unchanged` |
 | mypy | `Success: no issues found in 116 source files` |
@@ -116,10 +116,10 @@
   - 验收：对真实运行中的库执行 `backup.py --output-dir <临时目录>`，`agent-*.db` 完整性 `ok` 且 `schedules` 表可读；单测覆盖「备份后删除 agent.db，恢复后数据仍在」；全量 438 passed
   - 提交：`af42eef`
 
-- [ ] **C2 `agent.db` schema 版本化**
-  - 现状：`ScheduleStore` 用零散 `ALTER TABLE` 补列
-  - 动作：引入 `PRAGMA user_version` 与迁移函数
-  - 验收：旧库自动升级；版本不符时给出明确错误
+- [x] **C2 `agent.db` schema 版本化**
+  - 完成：2026-11-11
+  - 实现：`scheduler.py` 引入 `AGENT_SCHEMA_VERSION = 1` 与 `PRAGMA user_version`；`v0` 旧库自动补 `source` / `trigger_id` 并升到 `v1`；版本高于当前支持时抛 `RuntimeError`（提示升级或恢复旧备份），并关闭连接
+  - 测试：新增 `test_store_sets_user_version_on_create`、`test_store_rejects_newer_schema_version`；原迁移用例补充版本断言
 
 - [ ] **C3 调度时区显式化**
   - 现状：`datetime.now()` 使用本机时区，无配置项
@@ -291,6 +291,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 L3（87.7%，按用户调整的 80% 口径达标）、L4（高风险确认闸门 0 误发）、L5（真机控制/场景/定时冒烟）、L6（三份文档口径统一） |
 | 2026-11-11 | 完成 A1–A5：基线改为 434 passed / schema v3，真机口径四份文档统一，验收清单补 P3 新面（§9），文档链接 0 失效 |
 | 2026-11-11 | 完成 B1（真机只读复核，未发红外）、C1（`agent.db` 纳入备份与恢复，基线 438 passed） |
+| 2026-11-11 | 完成 C2（`agent.db` 用 `PRAGMA user_version` 版本化，基线 440 passed） |
 
 ---
 

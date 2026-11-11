@@ -23,6 +23,7 @@ from typing import Any, NamedTuple
 from homelink_agent.audit import AuditLog
 
 _RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+AGENT_SCHEMA_VERSION = 1
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedules (
     id          TEXT PRIMARY KEY,
@@ -96,19 +97,32 @@ class ScheduleStore:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.execute(_SCHEMA)
-            self._migrate()
+            try:
+                self._migrate()
+            except Exception:
+                self._conn.close()
+                raise
             self._conn.commit()
 
     def _migrate(self) -> None:
-        """旧库没有 source / trigger_id：补列，已有手工计划视为 source='manual'。"""
+        """用 `PRAGMA user_version` 记录 schema 版本，旧库就地升级。"""
 
-        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(schedules)")}
-        if "source" not in columns:
-            self._conn.execute(
-                "ALTER TABLE schedules ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
+        version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if version > AGENT_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"agent.db schema v{version} 高于当前支持的 v{AGENT_SCHEMA_VERSION}；"
+                "请升级 HomeLink 或从备份恢复旧库"
             )
-        if "trigger_id" not in columns:
-            self._conn.execute("ALTER TABLE schedules ADD COLUMN trigger_id TEXT")
+        if version == 0:
+            # v0 → v1：旧库没有 source / trigger_id，已有手工计划视为 source='manual'。
+            columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(schedules)")}
+            if "source" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE schedules ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
+                )
+            if "trigger_id" not in columns:
+                self._conn.execute("ALTER TABLE schedules ADD COLUMN trigger_id TEXT")
+            self._conn.execute(f"PRAGMA user_version = {AGENT_SCHEMA_VERSION}")
 
     def close(self) -> None:
         with self._lock:

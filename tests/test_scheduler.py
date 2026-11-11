@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from homelink_agent.scheduler import (
+    AGENT_SCHEMA_VERSION,
     SceneTriggerSchedule,
     Schedule,
     Scheduler,
@@ -183,6 +184,27 @@ def test_store_migrates_legacy_schedules_table(tmp_path: Path) -> None:
         assert {item.scene_id for item in store.list_all()} == {"scene-old", "scene-1"}
     finally:
         store.close()
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == AGENT_SCHEMA_VERSION
+
+
+def test_store_sets_user_version_on_create(tmp_path: Path) -> None:
+    path = tmp_path / "agent.db"
+    ScheduleStore(str(path)).close()
+
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == AGENT_SCHEMA_VERSION
+
+
+def test_store_rejects_newer_schema_version(tmp_path: Path) -> None:
+    path = tmp_path / "agent.db"
+    newer = sqlite3.connect(path)
+    newer.execute(f"PRAGMA user_version = {AGENT_SCHEMA_VERSION + 1}")
+    newer.commit()
+    newer.close()
+
+    with pytest.raises(RuntimeError, match="高于当前支持"):
+        ScheduleStore(str(path))
 
 
 def test_sync_scene_triggers_adds_updates_and_removes() -> None:
