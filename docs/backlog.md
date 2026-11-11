@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`8f5a73e`，472 passed，schema v3
+> 当前基线：`7a937da`，472 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -179,6 +179,7 @@
   - 接口：`GET /api/metrics`（受 Bearer 鉴权）返回 `status`、`schema_version`、`gateway.mode/base_url`、`uptime_seconds`、`requests{total,errors,error_rate,by_status}`、`latency_ms{p50,p95,samples}`；不探测网关，无网络副作用
   - 测试：`tests/test_api_common.py` 新增 4 条（健康+调用量+错误率、自身不计数、token 鉴权、5xx 与分位）；全量 472 passed
   - 文档：`api-contract.md` §2.1、`architecture.md`、`docs/README.md`、`roadmap.md`、`acceptance-checklist.md` 端点口径统一为 38（22 传统 + 16 Agent）/ 29 条路径
+  - 提交：`7a937da`
 
 - [ ] **D5 性能与容量基线**
   - 内容：场景 20 目标、`runs` limit、DB 增长、daemon 并发
