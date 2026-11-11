@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`a49f5ca`，472 passed，schema v3
+> 当前基线：`931cc9b`，472 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -164,6 +164,7 @@
   - 运行方式：`pip install -e ".[dev,e2e]"` → `python -m playwright install chromium` → `cd frontend && npm run build` → `python -m pytest -m e2e`；默认 `pytest` 由 `-m "not e2e"` 排除
   - CI：`.github/workflows/ci.yml` 新增 `e2e` job（setup-node 22 + `npm ci` + `npm run build` + Playwright Chromium）
   - 验收：本地连跑 2 次通过；默认全量仍 472 passed、0 skipped；ruff/black/mypy 全绿（120 files）
+  - 提交：`931cc9b`
 
 - [x] **D2 cron 属性测试**
   - 完成：2026-11-11
