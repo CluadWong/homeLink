@@ -120,7 +120,7 @@
   - 完成：2026-11-11
   - 实现：`scheduler.py` 引入 `AGENT_SCHEMA_VERSION = 1` 与 `PRAGMA user_version`；`v0` 旧库自动补 `source` / `trigger_id` 并升到 `v1`；版本高于当前支持时抛 `RuntimeError`（提示升级或恢复旧备份），并关闭连接
   - 测试：新增 `test_store_sets_user_version_on_create`、`test_store_rejects_newer_schema_version`；原迁移用例补充版本断言
-  - 提交：`af42eef`（与 C1 同一提交）
+  - 提交：`b9c7190`
 
 - [x] **C3 调度时区显式化**
   - 完成：2026-11-11
