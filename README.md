@@ -132,6 +132,7 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 - [范围](docs/scope.md)｜[架构](docs/architecture.md)｜[领域与数据](docs/domain-and-data.md)
 - [API 契约](docs/api-contract.md)｜[红外网关](docs/ir-gateway.md)｜[前端契约](docs/frontend-contract.md)
 - [验收清单](docs/acceptance-checklist.md)（含真实板子的验证边界）
+- [性能与容量基线](docs/performance.md)（P95、场景 20 动作、DB 增长、daemon 并发）
 - [开发路线图](docs/roadmap.md)（执行层 → Agent 侧车的里程碑与验收口径）
 - [当前开发清单](docs/backlog.md)（下一阶段 backlog，唯一前向清单）
 - [阶段执行记录](docs/roadmap-next.md)（P0–P3 已完成，已归档）

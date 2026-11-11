@@ -35,8 +35,8 @@
 | --- | --- |
 | pytest | `472 passed` |
 | ruff | `All checks passed` |
-| black | `118 files unchanged` |
-| mypy | `Success: no issues found in 118 source files` |
+| black | `119 files unchanged` |
+| mypy | `Success: no issues found in 119 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -181,9 +181,12 @@
   - 文档：`api-contract.md` §2.1、`architecture.md`、`docs/README.md`、`roadmap.md`、`acceptance-checklist.md` 端点口径统一为 38（22 传统 + 16 Agent）/ 29 条路径
   - 提交：`7a937da`
 
-- [ ] **D5 性能与容量基线**
-  - 内容：场景 20 目标、`runs` limit、DB 增长、daemon 并发
-  - 验收：记录 P95 与容量上限，写入文档
+- [x] **D5 性能与容量基线**
+  - 完成：2026-11-11
+  - 实现：新增 `scripts/benchmark.py`（mock + 进程内 TestClient + 临时库，60 轮 × 20 设备/场景），打印 JSON 与 Markdown 表
+  - 结果（Windows 10 / Python 3.12.10，本机 SSD）：读接口 P95 2.9–16.3 ms；`runs?limit=50` P95 23.8 ms；场景 20 动作 P50 616.7 ms / P95 1366.0 ms，60 次全 `sent`；DB 增长约 10.6 KB/场景、543 B/动作
+  - 容量上限：场景 items 1–20、动作组目标 1–20、`runs` limit 1–50、审计 limit 1–200；daemon 对话并发 1（热态两次并发墙钟 9.37 s，分别完成于 3.97 s / 9.37 s）
+  - 文档：[performance.md](./performance.md)（口径、阈值建议、复现命令）；`docs/README.md` 与根 `README.md` 索引已加
 
 ---
 ## E. 交付形态（P2）
@@ -310,6 +313,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 C6（`command_requests` 保留期 180 天）、C7（审计隐私与保留说明，基线 445 passed） |
 | 2026-11-11 | 完成 D2（cron 属性测试：随机表达式与参考实现比对 + 整周扫描，基线 468 passed） |
 | 2026-11-11 | 完成 D4（后端 `/api/metrics`：健康、调用量、错误率、P50/P95；端点口径 38 / 29 路径，基线 472 passed） |
+| 2026-11-11 | 完成 D5（性能与容量基线：`scripts/benchmark.py` + `docs/performance.md`） |
 
 ---
 
