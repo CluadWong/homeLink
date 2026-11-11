@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`fcded0f`，472 passed，schema v3
+> 当前基线：`6165faf`，474 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -143,7 +143,7 @@
   - 实现：后端新增 `GET /api/agent/schedules`，代理 agentd 的 `GET /api/schedules`（`HOMELINK_AGENTD_URL` / `HOMELINK_AGENTD_TOKEN`，3 s 超时；不可达 → 503 `DEVICE_OFFLINE`）；前端场景页加载计划状态，卡片上显示「上次执行成功 / 失败 · 原因」，失败计划在页首汇总列出且注明不会自动重试；agentd 未启动时显示「定时状态暂不可用」，场景列表照常
   - 测试：`tests/test_agent_schedules_api.py` 覆盖代理成功与 503；`vue-tsc` 通过；全量 474 passed、0 skipped（123 files）
   - 验收：失败计划在界面上可见，不静默；端点口径 39（22 传统 + 17 Agent）/ 30 条路径
-  - 提交：待回填
+  - 提交：`56d3ee0`
 
 - [x] **C6 数据保留策略**
   - 完成：2026-11-11
@@ -211,7 +211,7 @@
   - 动作：Dockerfile + compose，或 systemd unit
   - 实现：`Dockerfile` 两段构建（Node 22 产出 `frontend/dist` → Python 3.12 运行镜像，`pip install ".[agent]"` 同时带 MCP / daemon）；`docker-compose.yml` 起 `backend`（8000，同源托管前端，代理调度状态到 `http://agent:8100`）与 `agent`（8100，`agentd`，Ollama 经 `host.docker.internal` / `host-gateway`），共享宿主 `config/`、`data/`、`logs/`；`.dockerignore`；README 新增「Linux / Docker 部署」；CI 新增 `docker` job（ubuntu 上构建、起双容器、健康检查 + `/api/agent/schedules` 冒烟）
   - 验收：非 Windows 环境可启动后端与 daemon —— 本机无 Docker，**未在 Windows 上实机验证**镜像运行；Dockerfile / compose 已做 YAML 解析与路径核对（`config_dir.parent` → `/app/frontend/dist` 与镜像布局一致），实际构建与启动由 CI `docker` job 在 ubuntu-latest 验证；本机全量 474 passed / 123 files
-  - 提交：待回填
+  - 提交：`6165faf`
 
 - [ ] **E2 一键部署 / 升级 / 回滚**
   - 内容：配置迁移、数据库迁移、版本检查
