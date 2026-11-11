@@ -1,0 +1,62 @@
+# HomeLink 双进程部署：backend（8000，托管前端）+ agent（8100，调度与对话）。
+# 用法：
+#   docker compose build
+#   docker compose up -d
+#   docker compose logs -f backend agent
+# 首次运行前：cp config/settings.yaml 按需改网关模式；Ollama 需在宿主机运行。
+
+services:
+  backend:
+    build: .
+    image: homelink:latest
+    command:
+      - uvicorn
+      - homelink.interface.api.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    ports:
+      - "8000:8000"
+    environment:
+      HOMELINK_CONFIG_DIR: /app/config
+      HOMELINK_DB_PATH: /app/data/homelink.db
+      # 供 /api/agent/schedules 代理调度状态；token 与 agent 的 AGENTD_TOKEN 一致
+      HOMELINK_AGENTD_URL: http://agent:8100
+      HOMELINK_AGENTD_TOKEN: ${AGENTD_TOKEN:-}
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    restart: unless-stopped
+
+  agent:
+    build: .
+    image: homelink:latest
+    command:
+      - homelink-agentd
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8100"
+    environment:
+      HOMELINK_BASE_URL: http://backend:8000
+      HOMELINK_API_TOKEN: ${HOMELINK_API_TOKEN:-}
+      AGENTD_TOKEN: ${AGENTD_TOKEN:-}
+      AGENTD_HOST: 0.0.0.0
+      AGENTD_PORT: "8100"
+      AGENTD_DB_PATH: /app/data/agent.db
+      AGENT_AUDIT_PATH: /app/logs/agent-audit.jsonl
+      # Ollama 在宿主机：Linux 用 host-gateway，Docker Desktop 自带 host.docker.internal
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b-q4_K_M}
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+    restart: unless-stopped

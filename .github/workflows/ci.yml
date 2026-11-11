@@ -39,3 +39,30 @@ jobs:
       - run: npm run build
         working-directory: frontend
       - run: python -m pytest -m e2e -q
+
+  docker:
+    # E1：Linux 上真实构建镜像并拉起 backend + agent（mock 网关，不需要 Ollama）。
+    # 先跑健康检查，再验证后端代理的 /api/agent/schedules 能连通 agent。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build
+      - run: docker compose up -d
+      - name: Smoke test both services
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8000/api/health >/dev/null \
+              && curl -fsS http://127.0.0.1:8000/api/agent/schedules >/dev/null; then
+              echo "backend and agent are up"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "services did not become ready"
+          docker compose logs
+          exit 1
+      - name: Logs
+        if: always()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v

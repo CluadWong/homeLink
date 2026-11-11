@@ -59,6 +59,23 @@ python scripts\rotate_logs.py             # logs\ 下超 5 MB 的 .log/.jsonl �
 - 恢复前先停服务（agent 备份先停 `HomeLinkAgent`）；脚本会先校验备份、恢复后复检，坏备份直接拒绝且不动现有库。
 
 
+### Linux / Docker 部署
+
+Windows 计划任务是本机默认方式；Linux（或任何装了 Docker 的机器）用镜像部署：后端与 daemon 各一个容器，共享宿主 `config/`、`data/`、`logs/`。
+
+```bash
+docker compose build
+docker compose up -d
+docker compose logs -f backend agent
+```
+
+- 后端 `8000` 对外，同源托管 Vue 构建产物（镜像内已执行 `npm run build`，无需宿主装 Node）；daemon `8100` 只在容器网络内暴露。
+- Ollama 留在宿主机运行，容器经 `host.docker.internal` 访问；模型名用 `OLLAMA_MODEL` 覆盖。
+- `AGENTD_TOKEN`、`HOMELINK_API_TOKEN` 通过 shell 环境或仓库根 `.env` 传入；`AGENTD_TOKEN` 非空时，后端 `/api/agent/schedules` 代理会带同一 token。
+- 默认仍是 `mock` 网关（不发红外）；切 `real` 需容器可访问网关地址，并改 `config/settings.yaml` / `settings.local.yaml`。
+- 升级：`docker compose build && docker compose up -d`；回滚：切回旧镜像 tag 再 `docker compose up -d`。数据在宿主 `data/`，不随容器删除。
+- 备份在宿主执行（镜像不含 `scripts/`）：`python scripts/backup.py`。
+
 ## 配置
 
 配置目录默认是仓库根的 `config/`：
