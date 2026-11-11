@@ -39,7 +39,7 @@ uvicorn homelink.interface.api.app:app --host 0.0.0.0 --port 8000
 - **网关地址**：只能用 `PUT /api/gateway` 写本地覆盖层；返回 `restart_required`，`GET /api/gateway` 会回显新地址并标 `pending_restart=true` 直到重启。
 - **静态托管开关**：`frontend.enabled`（默认 `true`）与 `frontend.dist_path`（默认 `frontend/dist`，相对配置目录的上一级解析）。关闭 = 纯 API；开启但缺 `dist/index.html` 时，非 API 路径返回 503 并提示先构建，`/api` 不受影响。
 - 写入必须经 `ConfigService`；鉴权值没有 API，只能改本地覆盖层并重启；房间种子同样需重启。
-- **当前验证边界**：后端只在 mock 下跑通全量测试；真实板子只做过**只读连通性确认**（探测、`ir_last_code` / `ir_learn_mode` 读取），**从未发送真实红外**，波形载荷与学码联动仍未知，见 `acceptance-checklist.md`。
+- **当前验证边界**：后端 mock 全量测试；真实板子（`192.168.10.3`）已完成只读探测、真机学码 / 保存 / 回放（2026-11-08，结果由用户人眼确认），2026-11-11 补做单设备控制、场景执行、定时触发冒烟各 1 次；红外单向，最终动作只能人眼确认，详见 `acceptance-checklist.md`。
 - **配置缺失/损坏**：必需文件不存在或 YAML 解析失败时，启动会打印文件全路径、最小可用示例与文档位置，并以非 0 退出码结束（命令行与 `create_app_from_env` 同一段提示）。
 
 ## 文档索引

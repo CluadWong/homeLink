@@ -2,8 +2,9 @@
 
 > 交接对象：接手 HomeLink 单 Agent MVP 收口的 Agent
 > 交接日期：2026-11-11
+> 状态：L1–L6 已完成（2026-11-11），单 Agent MVP 验收通过；本文件转为历史记录，后续以 [backlog.md](./backlog.md) 为准
 > 当前 HEAD：`ae3142a`（任务卡：M1/M3 意图护栏与状态查询兜底）
-> 唯一前向清单：[backlog.md](./backlog.md) 的「L. 单 Agent MVP 验收收口」
+> 唯一前向清单：[backlog.md](./backlog.md)（L 组已完成，后续按 A/B/C 组推进）
 > 历史记录：[roadmap-next.md](./roadmap-next.md)（已归档，不要按它重做 P0–P3）
 
 ---

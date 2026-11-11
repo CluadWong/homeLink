@@ -1,6 +1,6 @@
 # 验收清单（重建版后端 + Vue 正式前端）
 
-基准日期：2026-11-06，终态更新 2026-11-08，P0 收口复测 2026-11-10，单 Agent 真机冒烟 2026-11-11。证据口径：全量测试 **280 passed**（2026-11-10，P0-1~P0-5 后；198 passed 为 2026-11-08 里程碑验收的历史值）；真机（192.168.10.3）已完成「学码 → 保存 → 试一次」与「调用」端到端验收，期间真实发送过红外，结果由用户人眼确认；2026-11-11 补做单设备控制、场景执行、定时触发冒烟各 1 次，均 `status=sent`（详见 [backlog.md](./backlog.md) L5）。
+基准日期：2026-11-06，终态更新 2026-11-08，P0 收口复测 2026-11-10，单 Agent 真机冒烟 2026-11-11。证据口径：全量测试 **434 passed**（2026-11-11；198 passed 为 2026-11-08 里程碑验收的历史值）；真机（192.168.10.3）已完成「学码 → 保存 → 试一次」与「调用」端到端验收，期间真实发送过红外，结果由用户人眼确认；2026-11-11 补做单设备控制、场景执行、定时触发冒烟各 1 次，均 `status=sent`（详见 [backlog.md](./backlog.md) L5）。
 
 图例：✅ 已实现且有单测 ｜ 🟢 已真机验证 ｜ 🟡 代码存在但无自动化/运行验证 ｜ 🟠 只有单测替身证据、未真机验证 ｜ ❌ 未实现 ｜ ⚠️ 文档与实现不符（已在本轮修正）
 
@@ -33,7 +33,7 @@
 | 装配顺序（DB→配置→网关→仓储→服务域） | ✅ | `build_context` 单测通过；文档原写的 `state_store.restore` 不存在，已改为「读库即恢复」 ⚠️ |
 | 控制链路五步 | ✅ / 🟢 real | `ControlService` 单测：取功能→取最新码→回放→写 `unknown`→审计；真机回放成功，断电时在第一步即失败且不写状态 |
 | 运行时可改项与重启边界 | ✅ | `PUT /api/gateway` 写覆盖层 + `pending_restart`；其余重启生效 |
-| 33 个 HTTP 端点（21 传统 + 12 Agent） | ✅ | `test_api_common.py` 及端点级测试 |
+| 37 个 HTTP 端点（21 传统 + 16 Agent，28 条路径） | ✅ | `test_api_common.py` 及端点级测试；`/openapi.json` 实测 28 paths / 37 endpoints |
 | 目录骨架 | 🟡 | `scripts/start.py`、流式前端已存在；`agent_future/`、`hardware/ir-codes/` 目录不存在（未引用，不影响运行） |
 | ADR-01 网关抽象 | ✅ / 🟢 real | `IRGateway` + mock/real 两实现；real 实现在真机完成探测、学码、回放 |
 | ADR-02 功能即调用单元 | ✅ | 无能力表、无参数，`function_id` 唯一寻址 |
@@ -151,3 +151,23 @@
 - 路径风险：默认路径由 `Path(__file__).parents[4]` 推出，只在仓库内 / editable 安装成立；普通 wheel 安装会指向错误目录，**必须**设置 `HOMELINK_CONFIG_DIR` 与 `HOMELINK_DB_PATH`。
 - 前端：`frontend/dist` 为构建产物、不入 git；独立运行前需执行一次 `cd frontend && npm install && npm run build` 生成，或从已构建环境拷贝 dist 目录。`frontend.enabled=true` 时由后端同源提供，生产不使用 Vite dev server。
 - 结论：拷出 `config/` + 构建产物 `frontend/dist`（dist 不入 git，需先构建或从已构建环境拷贝）+ 装包 + 设两个环境变量即可独立运行；不依赖仓库内其它脚本或文件。必需配置缺失时现在会给「文件路径 + 最小示例 + 文档指针」并以非 0 退出，不必再读堆栈猜。
+
+## 9. P3 新增面（场景 v3 / 调度器 / Agent 运维，2026-11-11 补记）
+
+> 背景：场景动作组、触发器、执行记录、调度器、daemon 指标与鉴权都是近期新增面，旧清单未覆盖。
+
+| 条目 | 状态 | 证据 / 缺口 |
+| --- | --- | --- |
+| 场景动作组（`action_groups`）与顺序执行 | ✅ / 🟢 real | `test_agent_api.py::test_scene_action_group_crud_and_triggers`、`test_scene_payload_aggregates_high_risk`、`test_scene_requires_exactly_one_action_source`；真机 2026-11-11 执行「离家」成功（见 backlog L5） |
+| 场景逐设备失败不整体回滚 | ✅ | `test_scene_run_is_best_effort_when_one_device_missing_capability`、`test_scene_run_reports_offline_per_device_without_rollback` |
+| 场景触发器（manual / voice / schedule） | ✅ 模型 / 🟡 voice 冻结 | `test_scene_trigger_config_is_validated`；`schedule` 触发器由 daemon 启动时同步；`voice` 只保留数据模型，触发入口未实现（已冻结） |
+| 场景执行记录 `GET /api/agent/scenes/{id}/runs` | ✅ / 🟢 real | `test_scene_runs_group_by_trace_and_are_scoped_to_scene`、`test_scene_runs_validates_limit_and_scene`；真机读取到 2026-11-11 冒烟记录 |
+| 高风险场景确认闸门 | ✅ / 🟢 real | `test_high_risk_scene_requires_confirmation`；未确认返回 409 `CONFIRMATION_REQUIRED` 且不发送（backlog L4 隔离环境实测） |
+| 调度器 `ScheduleStore` 与 cron | ✅ / 🟢 real | `test_scheduler.py` 14 条（持久化、同分钟不重复、禁用跳过、失败不重试、旧表迁移、触发器同步）；真机 2026-11-11 18:25 自动执行 1 次，仅 1 条 `command_requests` |
+| 调度计划 API（`/api/schedules` CRUD） | ✅ | `test_daemon.py::test_schedule_create_list_delete_and_persist`、`test_schedule_persists_after_restart`、`test_high_risk_scene_requires_confirm_at_creation` |
+| daemon `/api/metrics` | ✅ | `test_metrics_counters_after_three_chats`、`test_metrics_counts_errors_on_503`、`test_metrics_counts_tool_calls`、`test_metrics_percentile_and_sample_cap` |
+| `AGENTD_TOKEN` 鉴权 | ✅ | `test_bearer_auth_enforced_when_token_set`、`test_bearer_auth_off_when_token_empty`（`/api/health` 豁免） |
+| 场景前端页 | ✅ 代码 / 🟡 无 UI 自动化 | `frontend/src/views/ScenesView.vue`（列表、编辑、执行、最近执行）；无 Playwright 覆盖（见 backlog D1） |
+| `data/agent.db` 备份与恢复 | ❌ | `scripts/backup.py` / `restore.py` 只覆盖 `homelink.db`（见 backlog C1） |
+| 调度失败可见性 | 🟡 | `last_status` / `last_error` 已入库且 `GET /api/schedules` 返回，前端未展示（见 backlog C5） |
+| daemon 单实例防重 | ❌ | 两个 daemon 同时运行会重复触发同一计划（见 backlog C4） |

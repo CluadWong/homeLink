@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`4338a1d`，384 passed，schema v3
+> 当前基线：`8ae085a`，434 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 
@@ -33,10 +33,10 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `430 passed` |
+| pytest | `434 passed` |
 | ruff | `All checks passed` |
-| black | `115 files unchanged` |
-| mypy | `Success: no issues found in 109 source files` |
+| black | `116 files unchanged` |
+| mypy | `Success: no issues found in 116 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -50,28 +50,25 @@
 
 ## A. 文档与基线收口（P0，必须先做）
 
-- [ ] **A1 归档 `roadmap-next.md`**
-  - 现状：文件名仍是「下一阶段」，正文仍列已修复的 P0 问题
-  - 动作：改写标题与状态为「阶段执行记录（已归档）」，顶部指向本文件
-  - 验收：新读者能明确区分「历史」与「待办」
+- [x] **A1 归档 `roadmap-next.md`**
+  - 完成：2026-11-11
+  - 验收：文件标题已改为「阶段路线执行记录（已归档）」，顶部指向本文件，并声明基线数字为历史快照
 
-- [ ] **A2 更新基线数字**
-  - 动作：统一为 384 passed、schema v3、HEAD `4338a1d`
-  - 检查点：`README.md`、`docs/README.md`、`docs/roadmap.md`、`docs/acceptance-checklist.md`
-  - 验收：全文搜索 `256 passed`、`233 passed`、`198 passed`、`d9adaec`，除历史章节外不再出现
+- [x] **A2 更新基线数字**
+  - 完成：2026-11-11
+  - 验收：实际自检 434 passed / ruff passed / black 116 unchanged / mypy 116 files；`docs/roadmap.md` 的 384、`docs/acceptance-checklist.md` 的 280 已更新；`README.md` 与 `docs/README.md` 无测试数字；`256/233/198 passed`、`d9adaec` 仅存在于已归档的 `roadmap-next.md`
 
-- [ ] **A3 统一真机验证口径**
-  - 冲突：`README.md` 与 `docs/roadmap.md` 写「从未发送真实红外」；`docs/acceptance-checklist.md` 写 2026-11-08 真机学码、保存、试一次、调用全链路通过
-  - 动作：确认事实后统一三处表述，保留日期与证据
-  - 验收：三份文档结论一致，不再互相矛盾
+- [x] **A3 统一真机验证口径**
+  - 完成：2026-11-11（L6 统一根 `README.md`、`docs/roadmap.md`、`docs/acceptance-checklist.md`；本轮补修 `docs/README.md` 仍写「从未发送真实红外」的残留）
+  - 验收：四份文档一致承认真实红外已发送，保留 2026-11-08 与 2026-11-11 的日期与证据
 
-- [ ] **A4 更新 `acceptance-checklist.md` 覆盖 P3 新面**
-  - 新增条目：场景动作组、触发器、执行记录、调度器、`/api/metrics`、`AGENTD_TOKEN`、场景前端页
-  - 验收：每条都有状态标记（✅ / 🟢 / 🟡 / ❌）与证据
+- [x] **A4 更新 `acceptance-checklist.md` 覆盖 P3 新面**
+  - 完成：2026-11-11
+  - 验收：新增 §9 共 13 条（场景动作组、逐设备失败、触发器、执行记录、高风险确认、调度器、计划 API、`/api/metrics`、`AGENTD_TOKEN`、场景前端页、agent.db 备份、失败可见性、单实例），每条带状态标记与证据；同时修正端点数为 37（21 + 16）
 
-- [ ] **A5 文档索引与链接检查**
-  - 动作：`docs/README.md` 加入本文件入口；确认所有相对链接存在
-  - 验收：索引可点通，无 404
+- [x] **A5 文档索引与链接检查**
+  - 完成：2026-11-11
+  - 验收：`docs/README.md` 已含本文件入口；脚本扫描根 `README.md` 与 `docs/*.md` 的全部相对链接，0 处失效
 
 ---
 
@@ -286,6 +283,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | --- | --- |
 | 2026-11-11 | 建立本清单；roadmap-next.md 归档为执行记录；新增 L 组并完成 L1/L2 |
 | 2026-11-11 | 完成 L3（87.7%，按用户调整的 80% 口径达标）、L4（高风险确认闸门 0 误发）、L5（真机控制/场景/定时冒烟）、L6（三份文档口径统一） |
+| 2026-11-11 | 完成 A1–A5：基线改为 434 passed / schema v3，真机口径四份文档统一，验收清单补 P3 新面（§9），文档链接 0 失效 |
 
 ---
 
