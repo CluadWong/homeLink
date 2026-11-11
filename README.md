@@ -29,15 +29,17 @@ powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
 powershell -ExecutionPolicy Bypass -File scripts\service\uninstall-service.ps1
 ```
 
-安装后有四个任务：
+安装后有五个任务：
 
 | 任务 | 触发 | 行为 |
 | --- | --- | --- |
 | `HomeLinkService` | 开机（以 SYSTEM 运行，无需登录） | 后台静默执行 `scripts\service\run-service.cmd`，启动输出含访问地址，写 `logs\service.log` |
 | `HomeLinkAgent` | 开机（以 SYSTEM 运行） | 常驻 Agent 服务（`homelink-agentd`，127.0.0.1:8100），日志写 `logs\agent.log` |
 | `HomeLinkBackup` | 每天 03:00（以 SYSTEM 运行） | 在线快照数据库到 `backups\`（默认保留 7 份），日志写 `logs\backup.log` |
+| `HomeLinkEval` | 每周日 04:00（以 SYSTEM 运行） | 跑 130 条评测：`scripts\eval_sandbox.py` 自建临时 mock 后端（**不发红外**），报告写 `docs\eval-report.md`，日志写 `logs\eval.log` |
 | `HomeLinkAddresses` | 用户登录 | 弹出终端执行 `scripts\service\show-addresses.cmd`，只显示当前访问地址，不重复启动服务 |
 
+- 评测也可手动执行：`python scripts\eval_sandbox.py`（全量）或 `python scripts\eval_sandbox.py --limit 5`（冒烟）；发版前建议先手动跑一次。
 - Agent 任务依赖 Ollama 已在运行；Ollama 未就绪时 daemon 会照常启动，首轮提问返回 503。
 - 安装脚本会**停用**旧项目的 `JJButlerService`（只停用不删除）；不想动旧任务时加 `-KeepOldService`。
 - 卸载后旧任务保持停用；需要恢复时执行 `uninstall-service.ps1 -RestoreOldService`。

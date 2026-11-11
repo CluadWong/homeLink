@@ -2,12 +2,14 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\service\install-service.ps1
 #
-# 做五件事：
+# 做六件事：
 #   1. 停用旧项目的计划任务 JJButlerService（只停用不删除；-KeepOldService 可跳过）；
 #   2. 注册 HomeLinkService：开机启动、后台静默，输出写 logs\service.log；
 #   3. 注册 HomeLinkAgent：开机常驻 Agent 服务（8100 端口），输出写 logs\agent.log；
 #   4. 注册 HomeLinkBackup：每天 03:00 在线快照数据库，输出写 logs\backup.log；
-#   5. 注册 HomeLinkAddresses：用户登录后弹出终端显示访问地址。
+#   5. 注册 HomeLinkEval：每周日 04:00 跑 130 条评测（临时 mock 后端，不发红外），
+#      报告写 docs\eval-report.md，日志写 logs\eval.log；
+#   6. 注册 HomeLinkAddresses：用户登录后弹出终端显示访问地址。
 #
 # 卸载见 uninstall-service.ps1。日志写 logs\service-install.log。
 
@@ -29,6 +31,7 @@ $oldTaskName = 'JJButlerService'
 $serviceTaskName = 'HomeLinkService'
 $agentTaskName = 'HomeLinkAgent'
 $backupTaskName = 'HomeLinkBackup'
+$evalTaskName = 'HomeLinkEval'
 $addressTaskName = 'HomeLinkAddresses'
 
 function Assert-Admin {
@@ -84,9 +87,10 @@ try {
     $runService = Join-Path $repoRoot 'scripts\service\run-service.cmd'
     $runAgent = Join-Path $repoRoot 'scripts\service\run-agent.cmd'
     $runBackup = Join-Path $repoRoot 'scripts\service\run-backup.cmd'
+    $runEval = Join-Path $repoRoot 'scripts\service\run-eval.cmd'
     $showAddresses = Join-Path $repoRoot 'scripts\service\show-addresses.cmd'
     $python = Join-Path $repoRoot '.venv\Scripts\python.exe'
-    foreach ($required in @($runService, $runAgent, $runBackup, $showAddresses, $python)) {
+    foreach ($required in @($runService, $runAgent, $runBackup, $runEval, $showAddresses, $python)) {
         if (-not (Test-Path $required)) { throw "缺少必需文件：$required" }
     }
 
@@ -110,7 +114,7 @@ try {
     }
 
     # 2) 清理上次安装可能残留的任务与进程（例如被旧编码脚本卡住的 cmd）
-    foreach ($name in @($serviceTaskName, $agentTaskName, $backupTaskName, $addressTaskName)) {
+    foreach ($name in @($serviceTaskName, $agentTaskName, $backupTaskName, $evalTaskName, $addressTaskName)) {
         $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -ne $existing) {
             Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -209,6 +213,29 @@ try {
         throw "任务 $backupTaskName 注册失败（任务列表里找不到）。"
     }
     Write-Host "已注册 $backupTaskName（每日 03:00 备份）。"
+
+    # 3.7) 每周评测：周日 04:00 跑 130 条（临时 mock 后端，不发红外），报告写 docs\eval-report.md
+    $evalAction = New-ScheduledTaskAction -Execute $runEval -WorkingDirectory $repoRoot
+    $evalTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '04:00'
+    $evalPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $evalSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+        -MultipleInstances IgnoreNew
+    Register-ScheduledTask `
+        -TaskName $evalTaskName `
+        -Action $evalAction `
+        -Trigger $evalTrigger `
+        -Principal $evalPrincipal `
+        -Settings $evalSettings `
+        -Description 'HomeLink（重建版）：每周日 04:00 跑 130 条评测（mock 后端），报告 docs\eval-report.md，日志 logs\eval.log' `
+        -Force | Out-Null
+    if ($null -eq (Get-ScheduledTask -TaskName $evalTaskName -ErrorAction SilentlyContinue)) {
+        throw "任务 $evalTaskName 注册失败（任务列表里找不到）。"
+    }
+    Write-Host "已注册 $evalTaskName（每周日 04:00 评测）。"
 
     # 4) 登录后显示地址：只读展示，不重复启动服务
     $addressAction = New-ScheduledTaskAction -Execute $showAddresses -WorkingDirectory $repoRoot

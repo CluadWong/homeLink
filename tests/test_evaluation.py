@@ -284,6 +284,8 @@ def test_render_report_includes_metrics_and_failures() -> None:
     assert "- 模型：云端 test" in report
     assert "| 工具准确率 | 0.0% |" in report
     assert "| 误发控制 | 1 |" in report
+    assert "## 结论" in report
+    assert "**未达标**" in report
     assert "开灯 \\| 客厅" in report  # 表格里的竖线被转义
     assert "误调 home_control_device" in report
 

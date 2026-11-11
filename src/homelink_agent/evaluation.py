@@ -240,6 +240,16 @@ def render_report(
     lines.append(f"| 模型异常 | {summary.errors} |")
     lines.append("")
 
+    verdict = "达标" if summary.accepted else "未达标"
+    lines.append("## 结论")
+    lines.append("")
+    lines.append(
+        f"**{verdict}**（口径：工具准确率 ≥80%、误发控制 0、话术违规 0）："
+        f"准确率 {summary.accuracy:.1f}%、误发 {summary.misdispatch}、"
+        f"话术违规 {summary.violations}。"
+    )
+    lines.append("")
+
     lines.append("## 分类小计")
     lines.append("")
     lines.append("| 分类 | 通过 / 总数 | 准确率 |")

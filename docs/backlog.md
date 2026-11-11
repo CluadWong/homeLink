@@ -173,9 +173,14 @@
   - 验收：属性测试与参考实现 0 分歧；全量 468 passed
   - 提交：`8f5a73e`
 
-- [ ] **D3 评测常态化**
-  - 内容：130 条云端评测定期跑（发版前或每周）
-  - 验收：`docs/eval-report.md` 有模型、日期、指标与失败明细
+- [x] **D3 评测常态化**
+  - 完成：2026-11-11
+  - 内容：130 条评测定期跑（发版前或每周），默认用本机 Ollama
+  - 实现：新增 `scripts/eval_sandbox.py`——自建临时 mock 后端（临时配置 + 临时库，预置「卧室风扇」6 键、「卧室空调」2 键）跑全量，随机端口、`finally` 停服，全程不发真实红外；新增 `scripts/service/run-eval.cmd`，`install-service.ps1` 注册 `HomeLinkEval`（每周日 04:00，SYSTEM，2 小时上限，`IgnoreNew`），`uninstall-service.ps1` 与 README 同步；`render_report()` 增加「## 结论」段（达标 / 未达标 + 口径）
+  - 结果（Ollama `qwen3.5:9b-q4_K_M`，mock 后端，2 设备）：130 条 109 通过，准确率 83.8%，误发 1，话术违规 0，澄清率 90.3%，P50/P95 9710 / 38789 ms，模型异常 0；分类 control 17/30、honesty 11/15、risky 13/15、clarify 18/20，query / unsupported / multi_turn 全过
+  - 结论：按口径判「未达标」——准确率 83.8% 达标，但误发 1。误发为 `085 我要睡了你看着办`，属 L4 已决策「放权 / 模糊指令不纳入验收、不新增护栏」的已知缺口；另有 4 条「模型没有返回内容」（026/044/055/061）。control 类偏弱与 P95 38.8 s 已如实记入报告，未调低口径或删用例
+  - 验收：`docs/eval-report.md` 含模型、日期、后端地址、设备数、指标、结论、分类小计与失败明细；全量 472 passed、0 skipped；ruff/black/mypy 全绿（121 files）
+  - 提交：待回填
 
 - [x] **D4 后端可观测性补齐**
   - 完成：2026-11-11
@@ -320,6 +325,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 D4（后端 `/api/metrics`：健康、调用量、错误率、P50/P95；端点口径 38 / 29 路径，基线 472 passed） |
 | 2026-11-11 | 完成 D5（性能与容量基线：`scripts/benchmark.py` + `docs/performance.md`） |
 | 2026-11-11 | 完成 D1（场景页 Playwright E2E：新建/编辑/执行/结果/记录，CI 新增 e2e job；默认 pytest 仍 472 passed） |
+| 2026-11-11 | 完成 D3（评测常态化：`eval_sandbox.py` 自建 mock 后端 + 每周 `HomeLinkEval` 任务；本地 qwen3.5:9b 130 条 83.8%、误发 1，报告如实判未达标；基线 472 passed / 121 files） |
 
 ---
 
