@@ -210,6 +210,19 @@ def test_accepted_requires_all_three_thresholds() -> None:
     assert summarize(good).accepted is True
 
 
+def test_accepted_at_exactly_eighty_percent() -> None:
+    """验收口径：准确率 >= 80%（2026-11-11 由用户调整），80.0% 应判达标。"""
+
+    case = Case.from_dict({"text": "打开风扇", "expect": ["home_control_device"]})
+    outcomes = [_outcome(case, calls=(_call("home_control_device"),)) for _ in range(16)]
+    outcomes += [_outcome(case) for _ in range(4)]
+
+    summary = summarize(outcomes)
+
+    assert summary.accuracy == 80.0
+    assert summary.accepted is True
+
+
 def test_summarize_handles_empty_input() -> None:
     summary = summarize([])
 

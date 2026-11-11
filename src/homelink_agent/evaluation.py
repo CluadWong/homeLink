@@ -167,9 +167,9 @@ class Summary:
 
     @property
     def accepted(self) -> bool:
-        """P1-5 完成定义：工具准确率 ≥95%、误发 0、话术违规 0。"""
+        """验收口径（2026-11-11 由用户调整为 ≥80%）：工具准确率、误发 0、话术违规 0。"""
 
-        return self.accuracy >= 95.0 and self.misdispatch == 0 and self.violations == 0
+        return self.accuracy >= 80.0 and self.misdispatch == 0 and self.violations == 0
 
 
 def _percentile(values: list[float], pct: float) -> float | None:
