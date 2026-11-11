@@ -35,8 +35,8 @@
 | --- | --- |
 | pytest | `472 passed` |
 | ruff | `All checks passed` |
-| black | `119 files unchanged` |
-| mypy | `Success: no issues found in 119 source files` |
+| black | `120 files unchanged` |
+| mypy | `Success: no issues found in 120 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -158,9 +158,12 @@
 
 ## D. 质量工程（P1）
 
-- [ ] **D1 前端场景页 E2E**
-  - 内容：Playwright 覆盖列表、创建、编辑、执行、结果弹层
-  - 验收：关键路径可一键运行，最好进入 CI
+- [x] **D1 前端场景页 E2E**
+  - 完成：2026-11-11
+  - 实现：`tests/e2e/test_scenes_page.py` 用 Python Playwright 驱动 Chromium，真实后端（mock 网关、临时配置与临时库）+ 同源托管 `frontend/dist`；覆盖空态、新建（能力选择 + 勾设备）、编辑改名、执行结果弹层、执行记录
+  - 运行方式：`pip install -e ".[dev,e2e]"` → `python -m playwright install chromium` → `cd frontend && npm run build` → `python -m pytest -m e2e`；默认 `pytest` 由 `-m "not e2e"` 排除
+  - CI：`.github/workflows/ci.yml` 新增 `e2e` job（setup-node 22 + `npm ci` + `npm run build` + Playwright Chromium）
+  - 验收：本地连跑 2 次通过；默认全量仍 472 passed、0 skipped；ruff/black/mypy 全绿（120 files）
 
 - [x] **D2 cron 属性测试**
   - 完成：2026-11-11
@@ -315,6 +318,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 D2（cron 属性测试：随机表达式与参考实现比对 + 整周扫描，基线 468 passed） |
 | 2026-11-11 | 完成 D4（后端 `/api/metrics`：健康、调用量、错误率、P50/P95；端点口径 38 / 29 路径，基线 472 passed） |
 | 2026-11-11 | 完成 D5（性能与容量基线：`scripts/benchmark.py` + `docs/performance.md`） |
+| 2026-11-11 | 完成 D1（场景页 Playwright E2E：新建/编辑/执行/结果/记录，CI 新增 e2e job；默认 pytest 仍 472 passed） |
 
 ---
 

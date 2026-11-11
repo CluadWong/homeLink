@@ -17,3 +17,25 @@ jobs:
       - run: python -m black --check .
       - run: python -m mypy
       - run: python -m pytest -q
+
+  e2e:
+    # D1：前端场景页 E2E（真实后端 mock 网关 + 已构建 dist + Chromium）。
+    # 默认 pytest 不跑（-m "not e2e"），这里显式执行。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: pip install -e ".[mcp,agent,dev,e2e]"
+      - run: python -m playwright install chromium
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: python -m pytest -m e2e -q

@@ -32,6 +32,10 @@ dev = [
   "black>=24.0",
   "mypy>=1.11",
 ]
+# 可选组件：前端场景页 E2E（需 `playwright install chromium` 与已构建的 frontend/dist）。
+e2e = [
+  "playwright>=1.40",
+]
 
 [project.scripts]
 homelink-mcp = "homelink_mcp.server:main"
@@ -91,8 +95,9 @@ pythonpath = [".", "src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-q --strict-markers"
+addopts = '-q --strict-markers -m "not e2e"'
 markers = [
   "hardware: 需要真实硬件的用例（默认不跑）",
   "integration: 需要子进程与本机回环端口的端到端用例（mock 网关，可进 CI）",
+  "e2e: 需要 Playwright、Chromium 与已构建前端；默认不跑，用 `pytest -m e2e` 执行",
 ]

@@ -48,6 +48,23 @@ token 优先级：部署注入 > 当次输入 > 空（请求不带 `Authorizatio
 导航在主区顶部，六个入口固定；状态摘要条常驻，失败时清空而不展示陈旧数据。
 服务不可达时整页降级为「管家服务连不上」+ 重试，保留导航。
 
+## 场景页 E2E（Playwright）
+
+场景页的关键路径（列表 → 新建 → 编辑 → 执行 → 结果弹层 → 执行记录）由 Python Playwright 驱动 Chromium 覆盖，
+用真实后端（mock 网关）+ 临时数据库 + 同源托管的 `dist`，不发任何红外。
+
+```bash
+# 仓库根
+pip install -e ".[dev,e2e]"
+python -m playwright install chromium
+
+cd frontend && npm run build && cd ..
+
+python -m pytest -m e2e
+```
+
+默认 `pytest` 不跑（`pyproject.toml` 里 `-m "not e2e"`），CI 的 `e2e` job 会先构建前端再执行。
+
 ## 构建与托管
 
 ```bash

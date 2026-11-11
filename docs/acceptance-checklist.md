@@ -167,7 +167,7 @@
 | 调度计划 API（`/api/schedules` CRUD） | ✅ | `test_daemon.py::test_schedule_create_list_delete_and_persist`、`test_schedule_persists_after_restart`、`test_high_risk_scene_requires_confirm_at_creation` |
 | daemon `/api/metrics` | ✅ | `test_metrics_counters_after_three_chats`、`test_metrics_counts_errors_on_503`、`test_metrics_counts_tool_calls`、`test_metrics_percentile_and_sample_cap` |
 | `AGENTD_TOKEN` 鉴权 | ✅ | `test_bearer_auth_enforced_when_token_set`、`test_bearer_auth_off_when_token_empty`（`/api/health` 豁免） |
-| 场景前端页 | ✅ 代码 / 🟡 无 UI 自动化 | `frontend/src/views/ScenesView.vue`（列表、编辑、执行、最近执行）；无 Playwright 覆盖（见 backlog D1） |
+| 场景前端页 | ✅ 代码 / ✅ UI 自动化 | `frontend/src/views/ScenesView.vue`（列表、编辑、执行、最近执行）；`tests/e2e/test_scenes_page.py` 覆盖列表→新建→编辑→执行→结果弹层→执行记录，`pytest -m e2e` 一键运行，CI `e2e` job 执行 |
 | `data/agent.db` 备份与恢复 | ✅ | `scripts/backup.py` 默认同时快照 `agent-*.db`，`restore.py` 按前缀自动恢复；`test_backup_restore.py` 4 条（见 backlog C1） |
 | `agent.db` schema 版本化 | ✅ | `PRAGMA user_version`（`AGENT_SCHEMA_VERSION = 1`）；v0 自动升级，版本过高明确报错；见 backlog C2 |
 | 调度失败可见性 | 🟡 | `last_status` / `last_error` 已入库且 `GET /api/schedules` 返回，前端未展示（见 backlog C5） |
