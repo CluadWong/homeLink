@@ -70,6 +70,8 @@
   - 完成：2026-11-11
   - 验收：`docs/README.md` 已含本文件入口；脚本扫描根 `README.md` 与 `docs/*.md` 的全部相对链接，0 处失效
 
+> A 组提交：`a24b825`（任务卡：A 组文档收口）
+
 ---
 
 ## B. 真实环境验证（P0，最高业务价值）
@@ -80,6 +82,7 @@
   - 完成：2026-11-11 19:10（未发送任何红外）
   - 验收：`GET /api/gateway` → `mode=real`、`base_url=http://192.168.10.3`、`reachable=true`、`latency_ms=327`；`/api/health` → `schema_version=3`；`/api/agent/capabilities` → 6 个能力（风扇 `dev_56b875c8`）；设备 2 台（风扇、空调，均 `risk_level=low`）；`/api/state` 两台均 `unknown`
   - 备注：`command_requests` 未新增
+  - 提交：`af42eef`
 
 - [ ] **B2 真机单设备控制（需用户明确同意）**
   - 内容：选一个低风险设备，执行一次已学码功能
@@ -111,6 +114,7 @@
   - 实现：`scripts/backup.py` 默认同时备份 `homelink.db` 与 `agent.db`（`agent-<时间戳>.db`，两前缀各自裁剪），新增 `--agent-db` / `--skip-agent`；`scripts/restore.py` 按文件名 `agent-` 自动恢复为 `AGENTD_DB_PATH` 或 `data/agent.db`
   - 测试：`tests/test_backup_restore.py` 新增 4 条（agent 备份→删库→恢复数据仍在、库不存在返回 None、两前缀裁剪互不影响、CLI 自动目标）
   - 验收：对真实运行中的库执行 `backup.py --output-dir <临时目录>`，`agent-*.db` 完整性 `ok` 且 `schedules` 表可读；单测覆盖「备份后删除 agent.db，恢复后数据仍在」；全量 438 passed
+  - 提交：`af42eef`
 
 - [ ] **C2 `agent.db` schema 版本化**
   - 现状：`ScheduleStore` 用零散 `ALTER TABLE` 补列
