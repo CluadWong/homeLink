@@ -58,6 +58,30 @@ python scripts\rotate_logs.py             # logs\ 下超 5 MB 的 .log/.jsonl �
 - 学码数据在 `homelink.db`，定时计划在 `agent.db`；`install-service.ps1` 已注册 `HomeLinkBackup` 每天 03:00 同时备份两者（各保留 7 份），手动跑 `backup.py` 也随时可用，`--keep` 控制保留份数。agent 库不存在时自动跳过，加 `--skip-agent` 可只备份主库。
 - 恢复前先停服务（agent 备份先停 `HomeLinkAgent`）；脚本会先校验备份、恢复后复检，坏备份直接拒绝且不动现有库。
 
+### 升级与回滚
+
+```powershell
+python scripts\upgrade.py            # 停服务后执行：版本检查 → 备份 → 迁移 → 校验；失败自动回滚
+python scripts\upgrade.py --dry-run  # 只检查程序/库版本与配置，不写盘
+python scripts\upgrade.py --rollback # 还原上次升级前的 homelink.db / agent.db 与配置快照
+```
+
+- 升级会先把 `homelink.db`、`agent.db` 和 `settings*.yaml` / `devices*.yaml` 快照到 `backups/`（配置存 `backups/config-<时间戳>/`），成功后写 `data/upgrade.json` 记录前后版本与快照路径。
+- 迁移或完整性校验失败会自动还原并退出 1；库 schema 高于程序支持版本时直接拒绝（不降级）。
+- 配置向后兼容靠「读时默认值」，升级不改写用户配置；回滚只还原库与快照配置，程序（代码 / 镜像）需自行切回旧版本，否则下次启动会再次升级。
+- Docker 部署：先 `docker compose down`，在宿主执行同一命令，再 `docker compose up -d`。
+
+### 告警
+
+常驻进程把告警写成 `[ALERT]` 行到 stderr（落到 `logs\agent.log`），并追加 `logs\alerts.jsonl`（`AGENT_ALERT_PATH` 可改）：
+
+- `schedule_failed`：同一计划连续失败 3 次（成功一次即清零）；
+- `ollama_unavailable`：启动预热或对话调用 Ollama 失败；
+- `mcp_offline`：MCP 拉起或会话异常（对话返回 503 / 502，连接已重置）；
+- 备份失败：`backup.py` 以 `[ALERT] 备份失败` 写到 `logs\backup.log`。
+
+同 `kind + key` 10 分钟内只记一次，避免每分钟刷屏；查看：`Select-String -Path logs\alerts.jsonl -Pattern '"kind"'`。
+
 
 ### Linux / Docker 部署
 
@@ -129,6 +153,7 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 | `HOMELINK_LOG_LEVEL` | `INFO` | MCP 子进程 stderr JSONL 日志门槛（DEBUG/INFO/WARNING/ERROR） |
 | `AGENT_MAX_STEPS` | `6` | 单轮最多几跳工具调用 |
 | `AGENT_AUDIT_PATH` | `logs/agent-audit.jsonl` | 审计日志路径；设为 `off` 关闭 |
+| `AGENT_ALERT_PATH` | `logs/alerts.jsonl` | 告警 JSONL 路径（同时以 `[ALERT]` 写到 stderr） |
 | `AGENT_DEBUG` | 未设置 | 设为 `1` 打印工具调用明细 |
 | `AGENT_KEEP_ALIVE` | `30m` | 模型驻留时长（透传 Ollama `keep_alive`） |
 | `AGENTD_HOST` / `AGENTD_PORT` | `127.0.0.1` / `8100` | daemon 监听地址 |

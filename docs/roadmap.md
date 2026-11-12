@@ -12,7 +12,7 @@
 | 工具面 | `src/homelink_mcp` 把 6 个能力封装成 MCP 工具（stdio）；`src/homelink_agent` 是本地 Ollama 侧车，工具 schema 由 `tools/list` 动态生成 |
 | 前端 | Vue 3 正式前端已构建并由后端同源托管；场景页含编辑、执行与历史记录；Streamlit 六页保留但非启动入口 |
 | 硬件 | 一台 ESPHome 红外网关；`mock` / `real` 只靠配置切换 |
-| 验证 | 全量 pytest 474 passed（2026-11-11）；ruff / black / mypy 全绿；真实板子学码 / 回放已验收，详见 `acceptance-checklist.md` |
+| 验证 | 全量 pytest 487 passed（2026-11-12）；ruff / black / mypy 全绿；真实板子学码 / 回放已验收，详见 `acceptance-checklist.md` |
 | 运维 | 开机静默自启（计划任务 `HomeLinkService` / `HomeLinkAgent`）+ 每日 03:00 自动备份（`HomeLinkBackup`）+ 登录后地址展示（`HomeLinkAddresses`）；Linux 用 `Dockerfile` + `docker-compose.yml`（backend / agent 双容器） |
 
 ## 总体原则

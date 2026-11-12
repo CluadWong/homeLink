@@ -33,10 +33,10 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `474 passed` |
+| pytest | `487 passed` |
 | ruff | `All checks passed` |
-| black | `123 files unchanged` |
-| mypy | `Success: no issues found in 123 source files` |
+| black | `127 files unchanged` |
+| mypy | `Success: no issues found in 127 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -213,13 +213,19 @@
   - 验收：非 Windows 环境可启动后端与 daemon —— 本机无 Docker，**未在 Windows 上实机验证**镜像运行；Dockerfile / compose 已做 YAML 解析与路径核对（`config_dir.parent` → `/app/frontend/dist` 与镜像布局一致），实际构建与启动由 CI `docker` job 在 ubuntu-latest 验证；本机全量 474 passed / 123 files
   - 提交：`6165faf`
 
-- [ ] **E2 一键部署 / 升级 / 回滚**
+- [x] **E2 一键部署 / 升级 / 回滚**
+  - 完成：2026-11-12
   - 内容：配置迁移、数据库迁移、版本检查
-  - 验收：升级失败可回滚，数据不丢
+  - 实现：新增 `scripts/upgrade.py`——升级前校验配置可解析（`ConfigService`）、拒绝库 schema 高于程序版本；在线快照 `homelink.db` / `agent.db` 到 `backups/`，并把 `settings*.yaml` / `devices*.yaml` 复制成 `backups/config-<时间戳>/`；复用 `Database.initialize()` 与 `ScheduleStore` 原地补表迁移，校验后写 `data/upgrade.json`（前后版本 + 快照路径）；迁移/校验失败自动还原库与配置并退出 1。`--dry-run` 只检查，`--rollback` 按版本记录还原。配置以「读时默认值」演进，升级不改写用户配置，故回滚无需配置迁移脚本
+  - 验收：升级失败可回滚，数据不丢——`tests/test_upgrade.py` 覆盖成功备份+版本记录、迁移失败自动回滚（库内数据仍在、留 `.pre-restore-*`）、拒绝降级、配置非法时不动库、dry-run 不写盘、`--rollback` 还原库与配置；README 增「升级与回滚」
+  - 提交：待回填
 
-- [ ] **E3 告警**
+- [x] **E3 告警**
+  - 完成：2026-11-12
   - 内容：备份失败、调度连续失败、MCP 掉线、Ollama 不可用
-  - 验收：至少有日志告警；理想是本地通知
+  - 实现：新增 `src/homelink_agent/alerts.py`——统一 `[ALERT]` stderr 行 + `logs/alerts.jsonl`，同 `kind+key` 10 分钟冷却；`Scheduler` 对同一计划连续失败 3 次告警（成功即清零，第 4 次起不重复）；daemon 在 Ollama 预热/对话失败记 `ollama_unavailable`，MCP 拉起/会话异常记 `mcp_offline`（对话分别 503/502）；`backup.py` 失败输出改为 `[ALERT] 备份失败`
+  - 验收：至少有日志告警——`tests/test_alerts.py` 覆盖落盘、冷却去重、过期再记、写文件失败降级；`tests/test_scheduler.py` 覆盖连续 3 次告警与成功清零；日志落 `logs\agent.log` / `logs\alerts.jsonl` / `logs\backup.log`，README 增「告警」；本地弹窗通知未做（记为后续可选）
+  - 提交：待回填
 
 ---
 
@@ -335,6 +341,8 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 D3（评测常态化：`eval_sandbox.py` 自建 mock 后端 + 每周 `HomeLinkEval` 任务；本地 qwen3.5:9b 130 条 83.8%、误发 1，报告如实判未达标；基线 472 passed / 121 files） |
 | 2026-11-11 | 完成 C5（调度失败可见性：后端 `/api/agent/schedules` 代理 agentd，场景页展示上次状态与失败原因；端点口径 39 / 30 路径） |
 | 2026-11-11 | 完成 E1（Linux / Docker 部署：`Dockerfile` + `docker-compose.yml` + `.dockerignore`，CI 新增 docker job 在 ubuntu 构建并冒烟双容器） |
+| 2026-11-12 | 完成 E2（一键升级/回滚：`scripts/upgrade.py` 版本检查 + 库/配置快照 + 失败自动回滚 + `--rollback`；`data/upgrade.json` 记录前后版本） |
+| 2026-11-12 | 完成 E3（告警：连续 3 次调度失败、Ollama 不可用、MCP 掉线写 `[ALERT]` + `logs/alerts.jsonl`，10 分钟冷却；备份失败加 `[ALERT]`） |
 
 ---
 
