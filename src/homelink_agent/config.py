@@ -40,8 +40,8 @@ class AgentSettings:
     queue_timeout: float = DEFAULT_QUEUE_TIMEOUT
     confirm_ttl: float = DEFAULT_CONFIRM_TTL
     agent_db_path: str = DEFAULT_AGENT_DB_PATH
-    # 默认关闭模型思考过程并限制输出长度，简单指令仍走快路径，复杂指令才用模型。
-    think: bool = False
+    # 简单指令由快路径处理（0 次推理）；回落到模型的都是复杂指令，默认保留思考过程。
+    think: bool = True
     num_predict: int = DEFAULT_NUM_PREDICT
 
 
@@ -92,6 +92,6 @@ def load_settings() -> AgentSettings:
         ),
         confirm_ttl=_positive_float(os.environ.get("AGENT_CONFIRM_TTL", ""), DEFAULT_CONFIRM_TTL),
         agent_db_path=(os.environ.get("AGENTD_DB_PATH") or DEFAULT_AGENT_DB_PATH).strip(),
-        think=_env_flag(os.environ.get("AGENT_THINK", ""), False),
+        think=_env_flag(os.environ.get("AGENT_THINK", ""), True),
         num_predict=_positive_int(os.environ.get("AGENT_NUM_PREDICT", ""), DEFAULT_NUM_PREDICT),
     )

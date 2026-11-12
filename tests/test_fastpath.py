@@ -97,3 +97,16 @@ def test_pick_command_falls_back_to_toggle() -> None:
 
 def test_pick_command_none_when_device_has_no_capabilities() -> None:
     assert pick_command({"capabilities": []}, "close") is None
+
+
+def test_pick_command_does_not_toggle_non_fan_devices() -> None:
+    # 空调只有「开关 / 模式」，没有独立开/关码；不能被翻转码兜底误执行。
+    ac = {
+        "device_id": "dev_ac",
+        "name": "空调",
+        "type": "air_conditioner",
+        "capabilities": [{"command": "开关"}, {"command": "模式"}],
+    }
+
+    assert pick_command(ac, "open") is None
+    assert pick_command(ac, "close") is None

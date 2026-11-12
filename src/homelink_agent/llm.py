@@ -22,7 +22,7 @@ async def chat(
         "model": settings.model,
         "messages": messages,
         "stream": False,
-        # 显式开关思考过程：默认关闭，减少「关闭风扇」这类指令的等待时间。
+        # 简单指令走快路径不经过这里；回落到模型的复杂指令默认保留思考过程。
         "think": settings.think,
     }
     if settings.num_predict > 0:

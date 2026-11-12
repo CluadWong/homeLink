@@ -352,17 +352,17 @@ def test_settings_default_model_speed(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = load_settings()
 
-    assert settings.think is False  # 默认关闭思考过程
+    assert settings.think is True  # 回落到模型的复杂指令默认保留思考过程
     assert settings.num_predict == DEFAULT_NUM_PREDICT
 
 
 def test_settings_model_speed_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AGENT_THINK", "1")
+    monkeypatch.setenv("AGENT_THINK", "0")
     monkeypatch.setenv("AGENT_NUM_PREDICT", "128")
 
     settings = load_settings()
 
-    assert settings.think is True
+    assert settings.think is False
     assert settings.num_predict == 128
 
 

@@ -147,4 +147,8 @@ def pick_command(device: dict[str, Any], direction: str) -> str | None:
             if "打开" in command or "开启" in command:
                 return command
     toggles = [command for command in commands if command in _TOGGLE_COMMANDS]
-    return toggles[0] if len(toggles) == 1 else None
+    # 翻转码兜底只对风扇生效：真机风扇只有「开关」码且已验证；
+    # 空调等设备没有独立开/关码时应交回模型说明限制。
+    if len(toggles) == 1 and str(device.get("type") or "") == "fan":
+        return toggles[0]
+    return None
