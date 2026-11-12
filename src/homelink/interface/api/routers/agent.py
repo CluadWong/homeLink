@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 
 from homelink.core.errors import AppError, ErrorCode
 from homelink.interface.api.schemas import (
+    AgentChatRequest,
     AgentControlRequest,
     AgentMetadataRequest,
     AgentSceneActionGroup,
@@ -14,7 +15,7 @@ from homelink.interface.api.schemas import (
     AgentSceneRunRequest,
 )
 from homelink.interface.api.security import require_token
-from homelink.interface.clients.agentd import AgentdUnavailableError
+from homelink.interface.clients.agentd import AgentdResponseError, AgentdUnavailableError
 
 router = APIRouter(prefix="/api/agent", tags=["agent"], dependencies=[Depends(require_token)])
 
@@ -198,6 +199,24 @@ def list_scene_runs(request: Request, scene_id: str, limit: int = 10) -> dict:
         raise AppError(ErrorCode.INVALID_REQUEST, "limit 需在 1–50 之间")
     context = request.app.state.context
     return _envelope(request, context.agent.scene_runs(scene_id, limit=limit))
+
+
+@router.post("/chat")
+def chat(request: Request, payload: AgentChatRequest) -> dict:
+    """界面文字对话（代理 agentd 的 `/api/chat`）：浏览器不直连 8100。"""
+
+    try:
+        result = request.app.state.agentd.chat(payload.message, payload.session_id)
+    except AgentdUnavailableError:
+        raise AppError(
+            ErrorCode.DEVICE_OFFLINE,
+            "管家服务（agentd）未启动或不可达；请确认 homelink-agentd 正在运行。",
+        ) from None
+    except AgentdResponseError as exc:
+        # 429 是模型排队超时，502 是 MCP 掉线；两者都原样把人话带回前端。
+        code = ErrorCode.EXECUTION_FAILED if exc.status == 502 else ErrorCode.DEVICE_OFFLINE
+        raise AppError(code, exc.detail or "管家服务暂时不可用") from None
+    return _envelope(request, result)
 
 
 @router.get("/schedules")

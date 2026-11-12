@@ -5,6 +5,7 @@ import {
   ApiError,
 } from './errors'
 import type {
+  AgentChatPayload,
   AppState,
   CapabilityListPayload,
   CaptureResult,
@@ -29,6 +30,8 @@ import type {
 
 const TOKEN_KEY = 'homelink_api_token'
 const REQUEST_TIMEOUT_MS = 30_000
+// 一轮对话要等本机模型推理（实测 P95 约 39 秒），单独放宽超时。
+const CHAT_TIMEOUT_MS = 180_000
 const TRACE_MAX_LENGTH = 64
 
 const injectedToken = (import.meta.env.VITE_API_TOKEN ?? '').trim()
@@ -104,10 +107,11 @@ async function request<T>(
   options: {
     body?: Record<string, unknown>
     params?: Record<string, string | number | boolean | undefined>
+    timeoutMs?: number
   } = {},
 ): Promise<T> {
   const controller = new AbortController()
-  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timer = window.setTimeout(() => controller.abort(), options.timeoutMs ?? REQUEST_TIMEOUT_MS)
   const url = `${baseUrl}${path}${queryString(options.params)}`
 
   let response: Response
@@ -311,6 +315,18 @@ export function fetchSceneRuns(sceneId: string, limit = 5): Promise<SceneRunsPay
 
 export function fetchSchedules(): Promise<ScheduleListPayload> {
   return request<ScheduleListPayload>('GET', '/api/agent/schedules')
+}
+
+// ---------------------------------------------------------------- 管家对话（后端代理 agentd）
+
+export function sendAgentChat(body: {
+  message: string
+  session_id?: string
+}): Promise<AgentChatPayload> {
+  return request<AgentChatPayload>('POST', '/api/agent/chat', {
+    body,
+    timeoutMs: CHAT_TIMEOUT_MS,
+  })
 }
 
 // ---------------------------------------------------------------- 学码

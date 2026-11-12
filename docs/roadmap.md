@@ -7,12 +7,12 @@
 
 | 项 | 现状 |
 | --- | --- |
-| 后端 | FastAPI 单进程 + 单 SQLite（schema v3）；30 条路径 / 39 个端点（22 传统 + 17 Agent），11 个错误码，`X-Trace-Id` 全链路 |
+| 后端 | FastAPI 单进程 + 单 SQLite（schema v3）；31 条路径 / 40 个端点（22 传统 + 18 Agent），11 个错误码，`X-Trace-Id` 全链路 |
 | Agent 接口 | `/api/agent/*` 粗粒度命名空间：设备模型含 `type/room/aliases/risk_level/capabilities/state`，`request_id` 幂等；场景按动作组顺序执行，含定时触发器与最近执行记录 |
 | 工具面 | `src/homelink_mcp` 把 6 个能力封装成 MCP 工具（stdio）；`src/homelink_agent` 是本地 Ollama 侧车，工具 schema 由 `tools/list` 动态生成 |
 | 前端 | Vue 3 正式前端已构建并由后端同源托管；场景页含编辑、执行与历史记录；Streamlit 六页保留但非启动入口 |
 | 硬件 | 一台 ESPHome 红外网关；`mock` / `real` 只靠配置切换 |
-| 验证 | 全量 pytest 487 passed（2026-11-12）；ruff / black / mypy 全绿；真实板子学码 / 回放已验收，详见 `acceptance-checklist.md` |
+| 验证 | 全量 pytest 493 passed（2026-11-12）；ruff / black / mypy 全绿；真实板子学码 / 回放已验收，详见 `acceptance-checklist.md` |
 | 运维 | 开机静默自启（计划任务 `HomeLinkService` / `HomeLinkAgent`）+ 每日 03:00 自动备份（`HomeLinkBackup`）+ 登录后地址展示（`HomeLinkAddresses`）；Linux 用 `Dockerfile` + `docker-compose.yml`（backend / agent 双容器） |
 
 ## 总体原则

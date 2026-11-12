@@ -154,6 +154,21 @@ class GatewayBaseUrlRequest(_StrictBody):
         return text
 
 
+class AgentChatRequest(_StrictBody):
+    """界面文字对话：长度与 agentd 一致；不带 session_id 表示新会话。"""
+
+    message: str = Field(min_length=1, max_length=2000)
+    session_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("message")
+    @classmethod
+    def _message_non_empty(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("不能为空")
+        return text
+
+
 class AgentControlRequest(_StrictBody):
     device_id: str
     command: str

@@ -34,10 +34,10 @@
 
 | 项 | 值 |
 | --- | --- |
-| pytest | `487 passed` |
+| pytest | `493 passed` |
 | ruff | `All checks passed` |
-| black | `127 files unchanged` |
-| mypy | `Success: no issues found in 127 source files` |
+| black | `128 files unchanged` |
+| mypy | `Success: no issues found in 128 source files` |
 | CI | `.github/workflows/ci.yml` |
 | schema | `SCHEMA_VERSION = 3` |
 | MCP 工具 | 6 个；`request_id` 必填；`X-Actor` / `X-Trace-Id` 已透传 |
@@ -243,10 +243,13 @@
 
 > 产品口径：浏览器输入文字 → 管家 Agent → 家电服务（只做基础开关）→ 本机运行。语音、多网关、多用户、云端部署均不在本期。
 
-- [ ] **M1 界面对话入口（P0）**
+- [x] **M1 界面对话入口（P0）**
+  - 完成：2026-11-12
   - 现状：前端 7 个页面没有对话页；Agent 只能走 CLI 或直连 `127.0.0.1:8100/api/chat`
-  - 动作：前端新增对话页（消息列表 + 输入框 + 发送中 / 失败态 + `session_id` 保持）；后端新增 `POST /api/agent/chat` 代理 agentd 的 `POST /api/chat`（`HOMELINK_AGENTD_URL` / `HOMELINK_AGENTD_TOKEN`，超时与 503 `DEVICE_OFFLINE` 沿用 C5 口径），浏览器不直连 8100
-  - 验收：浏览器输入「打开卧室风扇」能拿到回复；agentd 未启动时页面有明确提示且其它页不受影响；全量门禁不降
+  - 实现：后端新增 `POST /api/agent/chat`（`AgentChatRequest`：`message` 1–2000、`session_id` ≤64），`AgentdClient.chat()` 代理 agentd `/api/chat`，代理超时 120 s；agentd 不可达 → 503 `DEVICE_OFFLINE`，429（模型排队）→ 503 透传人话，502（MCP 掉线）→ 502 `EXECUTION_FAILED`。前端新增 `ChatView.vue`（消息列表、示例指令、发送中态、错误卡片、`session_id` 存 `sessionStorage`、新对话重置），路由 `/chat` 设为默认首页，导航新增「00 管家」
+  - 测试：`tests/test_agent_chat_api.py` 6 条（成功透传、无会话新建、不可达 503、429 映射、502 映射、空消息 400）；`vue-tsc` + `vite build` 通过
+  - 验收：全量 **493 passed**、0 skipped；ruff / black / mypy 全绿（128 files）；端点口径 40（22 + 18）/ 31 条路径
+  - 提交：（回填）
 
 - [ ] **M2 真机「开 / 关」闭环（P0）**
   - 内容：卧室风扇「开」「关」各 1 次（B2 只验证了「摇头」）
@@ -310,11 +313,11 @@ M 当前主线（P0）
 
 ---
 
-## H. 现在只做这 3 件事
+## H. 现在只做这 2 件事
 
 按顺序执行，完成后再展开其余条目：
 
-1. 界面对话入口：前端新增对话页 + 后端 `POST /api/agent/chat` 代理
+1. ~~界面对话入口：前端新增对话页 + 后端 `POST /api/agent/chat` 代理~~（M1，已完成）
 2. 真机「开 / 关」各一次闭环验证（需用户授权真实红外）
 3. 失败面精简版：网关不可达 / 错误网关凭据
 
@@ -379,6 +382,7 @@ M 当前主线（P0）
 | 2026-11-12 | 完成 E3（告警：连续 3 次调度失败、Ollama 不可用、MCP 掉线写 `[ALERT]` + `logs/alerts.jsonl`，10 分钟冷却；备份失败加 `[ALERT]`） |
 | 2026-11-12 | 完成 B2（真机单设备控制：卧室风扇「摇头」`status=sent`、1 条 `command_requests`、审计 `success`，用户人眼确认；未改代码，基线仍 487 passed） |
 | 2026-11-12 | 范围收缩：产品口径改为「浏览器文字指令 → 管家 Agent → 基础开关，本地部署」；新增 M 组（界面对话入口 / 开关闭环 / 失败面精简）；B3 / B4 / B6 与 F 组全部冷却（代码与文档保留，写恢复条件） |
+| 2026-11-12 | 完成 M1（界面对话入口：`POST /api/agent/chat` 代理 agentd、前端 `/chat` 页面与默认首页；493 passed / 128 files；端点 40 / 31 路径） |
 
 ---
 

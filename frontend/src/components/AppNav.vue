@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import { currentToken, hasInjectedToken, setRuntimeToken } from '../api/client'
 
 const pages = [
+  { index: '00', path: '/chat', label: '管家' },
   { index: '01', path: '/call', label: '调用' },
   { index: '02', path: '/devices', label: '设备' },
   { index: '03', path: '/learn', label: '学码' },

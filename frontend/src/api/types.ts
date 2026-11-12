@@ -255,6 +255,13 @@ export interface ScheduleListPayload {
   trace_id: string
 }
 
+/** 界面文字对话：后端代理 agentd `/api/chat`，浏览器不直连 8100。 */
+export interface AgentChatPayload {
+  success: true
+  result: { reply: string; session_id: string }
+  trace_id: string
+}
+
 export interface CapabilityListPayload {
   success: true
   result: { count: number; capabilities: Capability[] }

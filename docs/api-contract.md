@@ -59,7 +59,7 @@
 - 开启但缺 `dist/index.html`：启动日志打 WARNING，非 API 路径返回 **503 纯文本**「前端未构建…请先 `npm run build`」，`/api` 不受影响（**不是 500**）。
 - 生产**不使用 Vite dev server**：页面与 API 同源同端口，构建产物由后端直接提供；静态页面与 `/docs` 不受 token 约束。
 
-## 2. 端点清单（39 个）
+## 2. 端点清单（40 个）
 
 ### 2.1 健康检查与指标
 
@@ -145,7 +145,7 @@
 成功：`{records:[{created_at,action,device_id,result,reason,trace_id}], trace_id}`。
 `limit` 1–200（默认 50）；`result` 三值 `success` / `failed` / `all`（`all` 或缺省表示不筛选）；`device_id` 按 `audit_logs.device_id` **精确匹配**（空值记录不参与）。非法 → 400。
 
-### 2.10 Agent 能力（16）
+### 2.10 Agent 能力（18）
 
 前缀 `/api/agent`，成功统一返回 `{success, result, trace_id}`。请求头可选 `X-Actor`（≤ 64 字符，默认 `user`），只用于记录调用方，不参与鉴权；Agent 侧 MCP 客户端固定发送 `X-Actor: butler-agent`（`HOMELINK_ACTOR` 可覆盖）与每请求生成的 `X-Trace-Id`，审计按 `actor` 与 `trace_id` 串链。
 
@@ -167,6 +167,7 @@
 | 场景执行记录 | `GET /api/agent/scenes/{scene_id}/runs?limit=` |
 | 设备元数据 | `PUT /api/agent/devices/{device_id}/metadata` |
 | 自动化（未支持） | `POST /api/agent/automations` → 501 |
+| 管家对话 | `POST /api/agent/chat`（后端代理 agentd；不可达 → 503 `DEVICE_OFFLINE`） |
 | 定时任务状态 | `GET /api/agent/schedules`（后端代理 agentd；不可达 → 503 `DEVICE_OFFLINE`） |
 
 - 设备模型：`device_id / type / room / name / aliases / risk_level / online / online_scope / capabilities / state / state_source / state_updated_at / state_readback`。
@@ -178,6 +179,7 @@
 - 同一 `request_id` 重放：原命令成功 → 200 且 `replayed=true`；原命令失败 → 返回原错误码；`device_id/function_id/parameters` 不一致 → 409 `CONFLICT`。
 - 高风险设备未带 `confirm=true` → 409 `CONFIRMATION_REQUIRED`；Agent 必须先复述并取得用户确认。
 - 网关不可达 → 503 `DEVICE_OFFLINE` 且命令记为 `failed`；超时 → 504；网关响应异常 → 502。
+- `chat`：body `{message: 1–2000 字符, session_id?: ≤64}`，返回 `{reply, session_id}`；`session_id` 沿用则保留上下文，省略则新建。后端代理 agentd 的 `POST /api/chat`（超时 120 s），浏览器不直连 8100；agentd 429（模型排队超时）→ 503 `DEVICE_OFFLINE` 并透传人话，agentd 502（MCP 掉线）→ 502 `EXECUTION_FAILED`，不可达 → 503 `DEVICE_OFFLINE`。对话本身不落库、不改设备状态；是否发红外取决于模型在该轮是否调用 `control`。
 - **重试策略：调用方不得自动重发。** `GATEWAY_TIMEOUT` 时信号可能已发出，自动重试会造成重复动作（风扇开关类为翻转语义）；`EXECUTION_FAILED / DEVICE_OFFLINE` 已明确未执行，可在用户重新确认后用**新的 `request_id`** 重发。重放旧 `request_id` 只会拿回原结果，不会再次发送。
 - **场景模型**：`{scene_id, name, enabled, action_groups, triggers, items, risk_level, contains_high_risk, created_at, updated_at}`。场景是编排层，设备是执行层，两者只通过 `capability` 解耦。
 - `action_groups` 1–20 组，每组 `{group_id, name, capability, targets:[{device_id, device_name, room, function_id, command}]}`。`capability` 即能力名（功能名），同能力设备可放入同一组；创建/更新时逐台校验设备确实具备该能力，不支持 → 404 `NOT_FOUND`（提示缺少哪项能力），不会静默收录。同一组内设备重复 → 400。
