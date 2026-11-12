@@ -16,6 +16,7 @@ pytest.importorskip("mcp")
 
 from homelink_agent.agent import (  # noqa: E402
     HomeAgent,
+    _control_reply,
     _looks_like_consent,
     _Pending,
     _reply_text,
@@ -717,3 +718,157 @@ def test_respond_forces_snapshot_when_model_ignores_state_nudge() -> None:
     assert reply == "根据全屋快照，风扇状态是 unknown。"
     assert [name for name, _ in session.calls] == ["home_get_home_snapshot"]
     assert session.calls[0][1] == {}
+
+
+class _JsonSession:
+    """按工具名返回固定 JSON 文本的假会话。"""
+
+    def __init__(self, responses: dict[str, tuple[str, bool]]) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.responses = responses
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+        self.calls.append((name, arguments))
+        text, is_error = self.responses[name]
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)], isError=is_error)
+
+
+_DEVICES_JSON = json.dumps(
+    {"count": 1, "devices": [{"device_id": "dev_fan", "name": "风扇"}]}, ensure_ascii=False
+)
+_CONTROL_SENT_JSON = json.dumps(
+    {"request_id": "ag-1-2", "status": "sent", "device_id": "dev_fan", "command": "开关"},
+    ensure_ascii=False,
+)
+
+
+@pytest.mark.parametrize(
+    ("device_name", "command", "user_text", "expected"),
+    [
+        ("风扇", "开关", "关闭风扇", "风扇已关闭"),
+        ("风扇", "开关", "打开风扇", "风扇已打开"),
+        ("风扇", "开关", "切换一下", "风扇已切换"),
+        ("风扇", "关", "关风扇", "风扇已关闭"),
+        ("风扇", "摇头", "风扇摇头", "风扇已执行「摇头」"),
+        ("", "开关", "关闭", "设备已关闭"),
+    ],
+)
+def test_control_reply_is_one_short_sentence(
+    device_name: str, command: str, user_text: str, expected: str
+) -> None:
+    assert _control_reply(device_name, command, user_text) == expected
+
+
+def test_control_success_returns_one_line_without_final_model_call() -> None:
+    rounds: list[int] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        rounds.append(len(messages))
+        if len(rounds) == 1:
+            return {"tool_calls": [{"function": {"name": "home_find_devices", "arguments": {}}}]}
+        if len(rounds) == 2:
+            return {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "home_control_device",
+                            "arguments": {"device_id": "dev_fan", "command": "开关"},
+                        }
+                    }
+                ]
+            }
+        return {"content": "风扇已经关闭啦，红外信号已发出，但无法确认设备真实状态……"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _JsonSession(
+        {
+            "home_find_devices": (_DEVICES_JSON, False),
+            "home_control_device": (_CONTROL_SENT_JSON, False),
+        }
+    )
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "关闭风扇")
+    )
+
+    assert reply == "风扇已关闭"
+    assert len(rounds) == 2  # 成功模板回复替代第三轮模型调用
+    assert [name for name, _ in session.calls] == ["home_find_devices", "home_control_device"]
+
+
+def test_control_failure_keeps_model_explanation() -> None:
+    rounds: list[int] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        rounds.append(len(messages))
+        if len(rounds) == 1:
+            return {"tool_calls": [{"function": {"name": "home_find_devices", "arguments": {}}}]}
+        if len(rounds) == 2:
+            return {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "home_control_device",
+                            "arguments": {"device_id": "dev_fan", "command": "摇头"},
+                        }
+                    }
+                ]
+            }
+        return {"content": "风扇没有「摇头」这个功能。"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _JsonSession(
+        {
+            "home_find_devices": (_DEVICES_JSON, False),
+            "home_control_device": ("[NOT_FOUND] 设备不支持该功能", True),
+        }
+    )
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "风扇摇头")
+    )
+
+    assert reply == "风扇没有「摇头」这个功能。"
+    assert len(rounds) == 3  # 失败时仍交给模型解释
+
+
+def test_control_success_with_state_question_keeps_honest_reply() -> None:
+    rounds: list[int] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        rounds.append(len(messages))
+        if len(rounds) == 1:
+            return {"tool_calls": [{"function": {"name": "home_find_devices", "arguments": {}}}]}
+        if len(rounds) == 2:
+            return {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "home_control_device",
+                            "arguments": {"device_id": "dev_fan", "command": "开关"},
+                        }
+                    }
+                ]
+            }
+        return {"content": "模型不应该被调用第三次"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _JsonSession(
+        {
+            "home_find_devices": (_DEVICES_JSON, False),
+            "home_control_device": (_CONTROL_SENT_JSON, False),
+        }
+    )
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "关掉风扇，成功了吗")
+    )
+
+    assert reply == "风扇的操作信号已发出；红外是单向的，无法确认设备当前状态。"
+    assert len(rounds) == 2  # 用户问状态时用如实模板，不再额外推理

@@ -96,6 +96,53 @@ def _turn_request_id(turn_id: str, device_id: str, command: str) -> str:
     return f"ag-{turn_id}-{digest}"
 
 
+def _arguments_of(call: dict[str, Any]) -> dict[str, Any]:
+    """取 tool_call 的参数；模型可能返回 JSON 字符串，统一成字典。"""
+
+    arguments = (call.get("function") or {}).get("arguments") or {}
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            arguments = {}
+    return arguments if isinstance(arguments, dict) else {}
+
+
+def _json_payload(text: str) -> dict[str, Any] | None:
+    """工具成功时返回 JSON；报错文本有前缀，解析失败一律当作非成功。"""
+
+    raw = text.strip()
+    if not raw.startswith("{"):
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+_TOGGLE_COMMANDS = frozenset({"开关", "切换"})
+_CLOSE_WORDS = ("关闭", "关", "停止", "停")
+_OPEN_WORDS = ("打开", "开启", "启动", "开")
+
+
+def _control_reply(device_name: str, command: str, user_text: str) -> str:
+    """控制成功的一句话回复；翻转码按用户说的方向措辞。"""
+
+    name = device_name or "设备"
+    if command in _TOGGLE_COMMANDS:
+        if any(word in user_text for word in _CLOSE_WORDS):
+            return f"{name}已关闭"
+        if any(word in user_text for word in _OPEN_WORDS):
+            return f"{name}已打开"
+        return f"{name}已切换"
+    if any(word in command for word in _CLOSE_WORDS):
+        return f"{name}已关闭"
+    if any(word in command for word in _OPEN_WORDS):
+        return f"{name}已打开"
+    return f"{name}已执行「{command}」"
+
+
 class HomeAgent:
     def __init__(
         self,
@@ -111,6 +158,8 @@ class HomeAgent:
         self._pending_device: _Pending | None = None
         self._pending_scene: _Pending | None = None
         self._user_confirmed = False
+        # 本轮用过的设备名缓存：控制成功后直接拼一句话回复，省掉最后一次模型调用。
+        self._device_names: dict[str, str] = {}
 
     async def run(self, user_text: str, history: list[dict[str, str]] | None = None) -> str:
         """一次性路径（CLI）：每次现起 MCP 子进程，用完即关。"""
@@ -151,6 +200,7 @@ class HomeAgent:
         previous_pending_scene = self._valid_pending(self._pending_scene, key="scene_id")
         self._pending_scene = None
         self._user_confirmed = _looks_like_consent(user_text)
+        self._device_names = {}
         turn_id = uuid.uuid4().hex[:8]  # 本轮幂等键前缀，见 _turn_request_id
         self._audit.write(
             "turn_start",
@@ -241,6 +291,25 @@ class HomeAgent:
                             previous_pending_scene=previous_pending_scene,
                         )
                     )
+                # 单设备控制成功：运行时直接给一句话回复，不再让模型总结，
+                # 既避免啰嗦，也省掉一整次推理。
+                # 用户同一轮还问「成功了吗/确定吗」时，改成如实说明信号已发出。
+                if len(calls) == 1 and _tool_name(calls[0]) == "home_control_device":
+                    payload = _json_payload(str(messages[-1].get("content") or ""))
+                    if payload is not None and payload.get("status") == "sent":
+                        arguments = _arguments_of(calls[0])
+                        name = self._device_names.get(str(arguments.get("device_id") or ""), "")
+                        if needs_state_query:
+                            reply = (
+                                f"{name or '设备'}的操作信号已发出；"
+                                "红外是单向的，无法确认设备当前状态。"
+                            )
+                        else:
+                            reply = _control_reply(
+                                name, str(arguments.get("command") or ""), user_text
+                            )
+                        self._audit.write("turn_end", reply=reply)
+                        return reply
         except BaseExceptionGroup as group:
             # anyio 任务组会把模型/网络异常包成 ExceptionGroup，剥出来再抛
             error = _unwrap(group)
@@ -295,6 +364,8 @@ class HomeAgent:
             for block in result.content
             if getattr(block, "type", "") == "text"
         )
+        if name in {"home_find_devices", "home_get_home_snapshot"} and not result.isError:
+            self._remember_devices(_json_payload(text))
         _debug(f"[tool] {name} {json.dumps(arguments, ensure_ascii=False)} -> {text[:200]}")
         self._audit.write(
             "tool_call",
@@ -323,6 +394,19 @@ class HomeAgent:
         else:
             self._pending_device = None
         return {"role": "tool", "tool_name": name, "content": text or "（无输出）"}
+
+    def _remember_devices(self, payload: dict[str, Any] | None) -> None:
+        """缓存 device_id → name，供控制成功后的一句话回复使用。"""
+
+        if not payload:
+            return
+        for item in payload.get("devices") or []:
+            if not isinstance(item, dict):
+                continue
+            device_id = item.get("device_id") or item.get("id")
+            name = item.get("name")
+            if isinstance(device_id, str) and isinstance(name, str) and name:
+                self._device_names[device_id] = name
 
     def _valid_pending(self, pending: _Pending | None, *, key: str) -> _Pending | None:
         """过期检查：超过 confirm_ttl 的待确认项作废并审计 confirm_expired。"""
