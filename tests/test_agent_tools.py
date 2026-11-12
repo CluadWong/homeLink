@@ -15,6 +15,8 @@ import pytest
 pytest.importorskip("mcp")
 
 from homelink_agent.agent import (  # noqa: E402
+    DELEGATION_REPLY,
+    SCENE_MISSING_REPLY,
     HomeAgent,
     _control_reply,
     _looks_like_consent,
@@ -27,8 +29,10 @@ from homelink_agent.agent import (  # noqa: E402
 from homelink_agent.audit import AuditLog  # noqa: E402
 from homelink_agent.config import load_settings  # noqa: E402
 from homelink_agent.intent_guard import (  # noqa: E402
+    delegates_authority,
     requires_clarification,
     requires_context_followup,
+    requires_scene_check,
     requires_state_query,
 )
 from homelink_agent.llm import OllamaError, to_ollama_tool  # noqa: E402
@@ -575,6 +579,164 @@ def test_requires_state_query_detects_questions(text: str) -> None:
 )
 def test_requires_state_query_ignores_plain_controls(text: str) -> None:
     assert requires_state_query(text) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "帮我设个时间",
+        "帮我定个闹钟",
+        "设个闹钟提醒我起床",
+    ],
+)
+def test_requires_clarification_blocks_time_setting(text: str) -> None:
+    assert requires_clarification(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "给风扇定时",
+        "风扇定个时，半小时后关",
+        "设置每天早上七点自动打开风扇",
+    ],
+)
+def test_requires_clarification_allows_device_timer(text: str) -> None:
+    assert requires_clarification(text) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "执行睡觉场景",
+        "跑一下睡前模式",
+        "运行回家模式",
+        "现在执行安防场景",
+    ],
+)
+def test_requires_scene_check_detects_scene_intent(text: str) -> None:
+    assert requires_scene_check(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "切换一下风扇模式",
+        "卧室风扇自然风模式",
+        "帮我建一个回家自动开灯的规则",  # 创建自动化不是运行场景
+        "明天提醒我关风扇",  # 提醒不是运行场景
+        "把风扇关掉",
+    ],
+)
+def test_requires_scene_check_ignores_non_scene(text: str) -> None:
+    assert requires_scene_check(text) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我要睡了你看着办",
+        "你看着办",
+        "你决定",
+        "直接执行，不用问我",
+    ],
+)
+def test_delegates_authority_detects_delegation(text: str) -> None:
+    assert delegates_authority(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "打开风扇",
+        "算了不用了",
+        "关闭卧室风扇",
+    ],
+)
+def test_delegates_authority_ignores_concrete_commands(text: str) -> None:
+    assert delegates_authority(text) is False
+
+
+class _SnapshotSession:
+    """home_get_home_snapshot 返回指定 JSON，其余调用记录下来。"""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+        self.calls.append((name, arguments))
+        text = (
+            json.dumps(self.payload, ensure_ascii=False)
+            if name == "home_get_home_snapshot"
+            else "ok"
+        )
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)], isError=False)
+
+
+def test_respond_delegation_returns_template_without_model_or_tools() -> None:
+    chat_calls: list[list[dict[str, Any]]] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        chat_calls.append(tools)
+        return {"content": "不应被调用"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _RecordingSession()
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "我要睡了你看着办")
+    )
+
+    assert reply == DELEGATION_REPLY
+    assert chat_calls == []
+    assert session.calls == []
+
+
+def test_respond_scene_guard_blocks_when_no_scenes() -> None:
+    chat_calls: list[list[dict[str, Any]]] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        chat_calls.append(tools)
+        return {"content": "不应被调用"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _SnapshotSession({"devices": [], "scenes": []})
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "执行睡觉场景")
+    )
+
+    assert reply == SCENE_MISSING_REPLY
+    assert chat_calls == []
+    assert [name for name, _ in session.calls] == ["home_get_home_snapshot"]
+
+
+def test_respond_scene_guard_falls_through_when_scenes_exist() -> None:
+    chat_calls: list[list[dict[str, Any]]] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        chat_calls.append(tools)
+        return {"content": "已运行回家模式"}
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _SnapshotSession(
+        {"devices": [], "scenes": [{"scene_id": "sc_1", "name": "回家模式"}]}
+    )
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "运行回家模式")
+    )
+
+    assert reply == "已运行回家模式"
+    assert chat_calls == [[{"type": "function"}]]  # 场景存在时正常进入模型循环
+    assert [name for name, _ in session.calls] == ["home_get_home_snapshot"]
 
 
 def test_tool_name_survives_bad_tool_call_shape() -> None:

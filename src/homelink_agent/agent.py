@@ -17,8 +17,10 @@ from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings
 from homelink_agent.fastpath import match_devices, parse_simple_control, pick_command
 from homelink_agent.intent_guard import (
+    delegates_authority,
     requires_clarification,
     requires_context_followup,
+    requires_scene_check,
     requires_state_query,
 )
 from homelink_agent.llm import OllamaError, chat, to_ollama_tool
@@ -126,6 +128,15 @@ _TOGGLE_COMMANDS = frozenset({"开关", "切换"})
 _CLOSE_WORDS = ("关闭", "关", "停止", "停")
 _OPEN_WORDS = ("打开", "开启", "启动", "开")
 
+# 确定性护栏模板：由运行时直接回答，不给模型擅自控设备的机会。
+SCENE_MISSING_REPLY = (
+    "家里目前还没有配置任何场景，暂时没有可运行的场景。"
+    "需要我直接帮你控制某台设备吗？比如「打开风扇」或「关闭风扇」。"
+)
+DELEGATION_REPLY = (
+    "你还没有告诉我要做什么。请告诉我具体想控制的设备或想运行的场景，例如「关闭风扇」。"
+)
+
 
 def _control_reply(device_name: str, command: str, user_text: str) -> str:
     """控制成功的一句话回复；翻转码按用户说的方向措辞。"""
@@ -231,6 +242,25 @@ class HomeAgent:
                 self._audit.write("clarify_forced", user=user_text, reply=reply[:200])
                 self._audit.write("turn_end", reply=reply)
                 return reply
+
+            # 代劳授权护栏：用户让 agent 自行决定做什么时，必须先澄清，不能擅作主张控设备。
+            # 无条件拦截：同意词（如「执行」）只表达确认，不指定动作内容。
+            if delegates_authority(user_text):
+                self._audit.write("delegation_clarified", user=user_text)
+                self._audit.write("turn_end", reply=DELEGATION_REPLY)
+                return DELEGATION_REPLY
+
+            # 场景护栏：先查快照；场景缺失时直接说明，杜绝「场景不存在→擅自控设备」的漂移。
+            # 仅当用户正在确认一个待执行场景时跳过（该流程由场景确认闸门接管）。
+            if self._pending_scene is None and requires_scene_check(user_text):
+                snapshot_call = {"function": {"name": "home_get_home_snapshot", "arguments": {}}}
+                snapshot_message = await self._call_tool(session, snapshot_call, None, turn_id)
+                payload = _json_payload(str(snapshot_message.get("content") or ""))
+                if payload is not None and not (payload.get("scenes") or []):
+                    self._audit.write("scene_guard_blocked", user=user_text, reason="no_scenes")
+                    self._audit.write("turn_end", reply=SCENE_MISSING_REPLY)
+                    return SCENE_MISSING_REPLY
+                # 场景存在：按正常流程交给模型运行场景（高风险场景仍需确认）。
 
             # 确定性快路径：「关闭风扇」这类明确指令直接执行，不进入模型循环。
             if not needs_state_query:

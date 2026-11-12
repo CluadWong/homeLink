@@ -55,18 +55,32 @@ _STATE_RE = re.compile(
     r"确定|保证|成功了吗|发出去|发对|发错|断电|开着|关着"
 )
 
+# 场景意图：运行/执行某个场景。由运行时先查快照：场景缺失时直接说明，禁止转成设备控制。
+_SCENE_INTENT_RE = re.compile(r"场景|睡前|睡觉|离家|回家|安防|观影|影院|起床")
+# 创建自动化/提醒不是运行场景，交给模型按不支持能力如实回答。
+_AUTOMATION_RE = re.compile(r"自动化|规则|提醒")
+
+# 代劳授权：让 agent 自行决定做什么。必须先澄清，不能擅作主张控制设备。
+_DELEGATION_RE = re.compile(r"看着办|你决定|你安排|听你的|不用问我|都行")
+
+# 让用户设定时间/闹钟属于不支持的能力，先追问而不是直接处理。
+_TIME_RE = re.compile(r"设个时间|定个时间|设个闹钟|定个闹钟")
+
 
 def requires_clarification(text: str) -> bool:
     """本轮是否必须先追问、禁止调用工具。
 
     - 出现全局量词：一律追问（例如「全部关掉」「帮我把家里所有东西关一下」）。
     - 出现环境感受且没有具体设备/房间：追问（例如「太热了」「来点风」「有点闷」）。
+    - 让用户设时间/闹钟：追问（例如「帮我设个时间」），不与「给风扇定时」混淆。
     """
 
     stripped = text.strip()
     if not stripped:
         return False
     if _GLOBAL_RE.search(stripped):
+        return True
+    if _TIME_RE.search(stripped):
         return True
     vague_complaint = _COMPLAINT_RE.search(stripped) is not None and not any(
         word in stripped for word in _TARGET_WORDS
@@ -92,3 +106,21 @@ def requires_state_query(text: str) -> bool:
     # 命中状态词即要求查询；纯控制指令（例如「把风扇关掉」）不会命中状态词。
     # 同时含状态词与动作词（例如「刚才那下打开成功了吗」）仍要求查。
     return _STATE_RE.search(stripped) is not None
+
+
+def requires_scene_check(text: str) -> bool:
+    """是否是运行场景类意图（需要先查快照确认场景是否存在）。"""
+
+    stripped = text.strip()
+    if not stripped or _AUTOMATION_RE.search(stripped):
+        return False
+    return _SCENE_INTENT_RE.search(stripped) is not None
+
+
+def delegates_authority(text: str) -> bool:
+    """是否把「做什么」的决定权交给 agent（例如「你看着办」）。"""
+
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return _DELEGATION_RE.search(stripped) is not None

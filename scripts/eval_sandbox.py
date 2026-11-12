@@ -6,8 +6,8 @@
     python scripts/eval_sandbox.py --limit 5       # 冒烟
     python scripts/eval_sandbox.py --report docs/eval-report-local.md
 
-沙箱会自建临时配置（mock 网关）与临时数据库，按评测集假设预置「卧室风扇」6 个按键与
-「卧室空调」2 个按键；结束后自动停掉临时后端。
+沙箱会自建临时配置（mock 网关）与临时数据库，按真机状态预置「卧室风扇」6 个按键，
+「卧室空调」0 个按键（真机空调未学码，无已学功能）；结束后自动停掉临时后端。
 """
 
 from __future__ import annotations
@@ -46,7 +46,8 @@ _DEVICES = {
 }
 _SEED = {
     "卧室风扇": ["开关", "+", "-", "模式", "定时", "摇头"],
-    "卧室空调": ["开关", "模式"],
+    # 真机空调没有任何已学码（M2 验收口径）：评测夹具与真机保持一致。
+    "卧室空调": [],
 }
 _WAVEFORM = [900, 450, 900, 450]
 
