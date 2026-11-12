@@ -84,9 +84,11 @@
   - 备注：`command_requests` 未新增
   - 提交：`af42eef`
 
-- [ ] **B2 真机单设备控制（需用户明确同意）**
+- [x] **B2 真机单设备控制（需用户明确同意）**
+  - 完成：2026-11-12 11:27（用户明确授权发送真实红外）
   - 内容：选一个低风险设备，执行一次已学码功能
   - 验收：`status=sent`；审计有记录；用户人眼确认设备动作
+  - 证据：卧室风扇 `dev_56b875c8` / 「摇头」 `fn_682f0e66`；`POST /api/agent/control`（`request_id=b2-fan-osc-20261112-01`）→ `status=sent`、`replayed=false`、`trace_id=65cdf7ea`；`command_requests` 93→94（仅 1 条）；审计 id 144 `dev_56b875c8.control` `result=success`；用户人眼确认风扇摇头
 
 - [ ] **B3 真机场景执行**
   - 内容：2 至 3 台设备的场景，执行后查看「最近执行」
@@ -343,6 +345,7 @@ F P4 决策 ←───┘  F1 spike 可与 B/C 并行
 | 2026-11-11 | 完成 E1（Linux / Docker 部署：`Dockerfile` + `docker-compose.yml` + `.dockerignore`，CI 新增 docker job 在 ubuntu 构建并冒烟双容器） |
 | 2026-11-12 | 完成 E2（一键升级/回滚：`scripts/upgrade.py` 版本检查 + 库/配置快照 + 失败自动回滚 + `--rollback`；`data/upgrade.json` 记录前后版本） |
 | 2026-11-12 | 完成 E3（告警：连续 3 次调度失败、Ollama 不可用、MCP 掉线写 `[ALERT]` + `logs/alerts.jsonl`，10 分钟冷却；备份失败加 `[ALERT]`） |
+| 2026-11-12 | 完成 B2（真机单设备控制：卧室风扇「摇头」`status=sent`、1 条 `command_requests`、审计 `success`，用户人眼确认；未改代码，基线仍 487 passed） |
 
 ---
 
