@@ -103,7 +103,8 @@
   - 内容：创建 1 分钟后触发的计划，等待执行
   - 验收：`last_status=ok`；只产生一组 `command_requests`；无重复发送
 
-- [ ] **B5 真机失败面（裁剪后保留）**
+- [x] **B5 真机失败面（裁剪后保留）**
+  - 完成：2026-11-12（由 M3 执行，证据见 M 组）
   - 内容：只做「网关不可达」与「错误网关凭据」两项；「场景含离线设备」随 B3 冷却
   - 验收：分别得到 `DEVICE_OFFLINE`、`DEVICE_UNAUTHORIZED`；`command_requests` 不新增或记 `failed`；审计一致；不自动重发
 
@@ -259,9 +260,14 @@
   - 验收：各 `status=sent`、每次只新增 1 条 `command_requests`、审计 `success`、用户人眼确认、无 `replayed` 与自动重发。空调无功能码，未纳入
   - 提交：`48bbade`
 
-- [ ] **M3 失败面精简（P1）**
-  - 内容：执行 B5 裁剪后的两项（网关不可达 / 错误凭据）
-  - 验收：见 B5
+- [x] **M3 失败面精简（P1）**
+  - 完成：2026-11-12
+  - 内容：B5 裁剪后的两项（网关不可达 / 错误网关凭据），均在真机执行
+  - 证据（错误凭据）：临时把 `config/settings.local.yaml` 的 `gateway.ir.password` 改为错误值并重启 → `POST /api/learn/start` 401 `DEVICE_UNAUTHORIZED`（trace `a656beb3`，message 指向 `gateway.ir.username / gateway.ir.password`）；随后 `GET /api/learn/capture` 404，证实鉴权失败不建半开会话。恢复原配置重启后：网关 `reachable=true`（281 ms）、`learn/start` 200（trace `887c1da4`）、`learn/cancel` 200（trace `2830ed6d`）；审计 147/148 `learn.start` failed、149 success、150 cancel
+  - 证据（网关不可达）：用户拔掉板子电源 → `GET /api/gateway?refresh=true` 得 `reachable=false`「探测超时（3s）」；`POST /api/agent/control`（`dev_56b875c8` / `fn_c4a71e4a`，`request_id=m3-offline-20261112-01`）→ 503 `DEVICE_OFFLINE`（trace `53ebf0fa`），命令记录 `status=failed`、`error_code=DEVICE_OFFLINE`、`replayed=false`；`command_requests` 96→97 且该 `request_id` 仅 1 行；`device_states` 未新增；传统 `POST /api/control` → 504 `GATEWAY_TIMEOUT`（trace `m3off01`），审计 id 151 `dev_56b875c8.control` failed，reason 含完整原因
+  - 恢复：插回电源后探测 `reachable=true`（328 ms）；`command_requests` 仍 97、失败命令仍 `failed`（无自动重发）、审计最大 id 仍 151
+  - 验收：分别得到 503 `DEVICE_OFFLINE` 与 401 `DEVICE_UNAUTHORIZED`；失败命令记 `failed` 不重发；审计一致；`device_states` 无残留
+  - 提交：（回填）
 
 ---
 
@@ -316,15 +322,16 @@ M 当前主线（P0）
 
 ---
 
-## H. 现在只做这 1 件事
+## H. 当前主线收尾状态
 
-按顺序执行，完成后再展开其余条目：
+按顺序执行，三条已全部完成：
 
 1. ~~界面对话入口：前端新增对话页 + 后端 `POST /api/agent/chat` 代理~~（M1，已完成）
 2. ~~真机「开 / 关」各一次闭环验证~~（M2，已完成）
-3. 失败面精简版：网关不可达 / 错误网关凭据
+3. ~~失败面精简版：网关不可达 / 错误网关凭据~~（M3，已完成）
 
-> 其余条目状态：A / C / D / E 已完成；B1 / B2 已完成；B3 / B4 / B6 冷却；B5 裁剪后保留；F 组全部冷却。冷却项只有在恢复条件成立时才重新排期。
+> 其余条目状态：A / C / D / E 已完成；B1 / B2 / B5 已完成；B3 / B4 / B6 冷却；F 组全部冷却。冷却项只有在恢复条件成立时才重新排期。
+> 下一步无排期任务；若继续推进，从「界面/真机重启可用性」或用户新需求展开。
 
 ---
 
@@ -387,6 +394,7 @@ M 当前主线（P0）
 | 2026-11-12 | 范围收缩：产品口径改为「浏览器文字指令 → 管家 Agent → 基础开关，本地部署」；新增 M 组（界面对话入口 / 开关闭环 / 失败面精简）；B3 / B4 / B6 与 F 组全部冷却（代码与文档保留，写恢复条件） |
 | 2026-11-12 | 完成 M1（界面对话入口：`POST /api/agent/chat` 代理 agentd、前端 `/chat` 页面与默认首页；493 passed / 128 files；端点 40 / 31 路径） |
 | 2026-11-12 | 完成 M2（真机开关闭环：风扇「开关」翻转码连按两次，各自 `sent`、各 1 条 `command_requests`（94→96）、审计 145/146 `success`，用户人眼确认由关变开再停） |
+| 2026-11-12 | 完成 M3（失败面精简：错误凭据 → 401 `DEVICE_UNAUTHORIZED` 且不建半开会话；物理断电 → Agent 控制 503 `DEVICE_OFFLINE`、传统 control 504 `GATEWAY_TIMEOUT`，命令记 `failed`、计数只 +1、无自动重发、`device_states` 无新增；复电后恢复在线） |
 
 ---
 
