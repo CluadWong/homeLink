@@ -257,7 +257,7 @@
   - 实现说明：该风扇只有一个翻转码「开关」`fn_c4a71e4a`，无独立开/关；执行方式为连按两次，最终恢复原状
   - 证据：`m2-fan-toggle-20261112-01` → `status=sent`、`trace_id=2ffcda84`，`command_requests` 94→95，审计 id 145 `success`，用户确认风扇由关变开；`m2-fan-toggle-20261112-02` → `status=sent`、`trace_id=95e8388e`，95→96，审计 id 146 `success`，用户确认风扇已停
   - 验收：各 `status=sent`、每次只新增 1 条 `command_requests`、审计 `success`、用户人眼确认、无 `replayed` 与自动重发。空调无功能码，未纳入
-  - 提交：（回填）
+  - 提交：`48bbade`
 
 - [ ] **M3 失败面精简（P1）**
   - 内容：执行 B5 裁剪后的两项（网关不可达 / 错误凭据）
