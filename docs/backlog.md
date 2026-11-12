@@ -2,7 +2,7 @@
 
 > 文档状态：活跃
 > 生成日期：2026-11-11
-> 当前基线：`f432608`，487 passed，schema v3
+> 当前基线：`3a5ab84`，493 passed，schema v3
 > 前置文档：[roadmap-next.md](./roadmap-next.md)（已归档，仅作执行记录）
 > 本文件是唯一的前向开发清单：只列「还没做完的事」，完成一项勾一项。
 > **2026-11-12 范围收缩**：产品目标收敛为「浏览器文字指令 → 管家 Agent → 家电基础开关，本地部署」。已完成但不在当前口径内的能力一律**归档 / 冷却**——代码、测试、文档保留，不删除、不再扩展、不占验收；恢复条件写在对应条目里。
@@ -249,7 +249,7 @@
   - 实现：后端新增 `POST /api/agent/chat`（`AgentChatRequest`：`message` 1–2000、`session_id` ≤64），`AgentdClient.chat()` 代理 agentd `/api/chat`，代理超时 120 s；agentd 不可达 → 503 `DEVICE_OFFLINE`，429（模型排队）→ 503 透传人话，502（MCP 掉线）→ 502 `EXECUTION_FAILED`。前端新增 `ChatView.vue`（消息列表、示例指令、发送中态、错误卡片、`session_id` 存 `sessionStorage`、新对话重置），路由 `/chat` 设为默认首页，导航新增「00 管家」
   - 测试：`tests/test_agent_chat_api.py` 6 条（成功透传、无会话新建、不可达 503、429 映射、502 映射、空消息 400）；`vue-tsc` + `vite build` 通过
   - 验收：全量 **493 passed**、0 skipped；ruff / black / mypy 全绿（128 files）；端点口径 40（22 + 18）/ 31 条路径
-  - 提交：（回填）
+  - 提交：`3a5ab84`
 
 - [ ] **M2 真机「开 / 关」闭环（P0）**
   - 内容：卧室风扇「开」「关」各 1 次（B2 只验证了「摇头」）
