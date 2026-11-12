@@ -267,7 +267,7 @@
   - 证据（网关不可达）：用户拔掉板子电源 → `GET /api/gateway?refresh=true` 得 `reachable=false`「探测超时（3s）」；`POST /api/agent/control`（`dev_56b875c8` / `fn_c4a71e4a`，`request_id=m3-offline-20261112-01`）→ 503 `DEVICE_OFFLINE`（trace `53ebf0fa`），命令记录 `status=failed`、`error_code=DEVICE_OFFLINE`、`replayed=false`；`command_requests` 96→97 且该 `request_id` 仅 1 行；`device_states` 未新增；传统 `POST /api/control` → 504 `GATEWAY_TIMEOUT`（trace `m3off01`），审计 id 151 `dev_56b875c8.control` failed，reason 含完整原因
   - 恢复：插回电源后探测 `reachable=true`（328 ms）；`command_requests` 仍 97、失败命令仍 `failed`（无自动重发）、审计最大 id 仍 151
   - 验收：分别得到 503 `DEVICE_OFFLINE` 与 401 `DEVICE_UNAUTHORIZED`；失败命令记 `failed` 不重发；审计一致；`device_states` 无残留
-  - 提交：（回填）
+  - 提交：`64031f9`
 
 ---
 
