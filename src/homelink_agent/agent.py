@@ -227,7 +227,7 @@ class HomeAgent:
             if clarify_only:
                 messages.append({"role": "system", "content": CLARIFY_INSTRUCTION})
                 message = await self._chat(self._settings, messages, [])
-                reply = _reply_text(message) or "请说明要控制哪台设备，或确认要操作的范围。"
+                reply = _reply_text(message) or "你想控制哪台设备？请告诉我设备名称或房间。"
                 self._audit.write("clarify_forced", user=user_text, reply=reply[:200])
                 self._audit.write("turn_end", reply=reply)
                 return reply

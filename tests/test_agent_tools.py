@@ -25,7 +25,7 @@ from homelink_agent.agent import (  # noqa: E402
     _unwrap,
 )  # noqa: E402
 from homelink_agent.audit import AuditLog  # noqa: E402
-from homelink_agent.config import DEFAULT_NUM_PREDICT, load_settings  # noqa: E402
+from homelink_agent.config import load_settings  # noqa: E402
 from homelink_agent.intent_guard import (  # noqa: E402
     requires_clarification,
     requires_context_followup,
@@ -353,7 +353,7 @@ def test_settings_default_model_speed(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = load_settings()
 
     assert settings.think is True  # 回落到模型的复杂指令默认保留思考过程
-    assert settings.num_predict == DEFAULT_NUM_PREDICT
+    assert settings.num_predict == 0  # 默认不限制输出，避免截断思考
 
 
 def test_settings_model_speed_env(monkeypatch: pytest.MonkeyPatch) -> None:
