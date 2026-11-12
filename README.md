@@ -156,6 +156,8 @@ homelink-agentd                    # 默认 127.0.0.1:8100，开机自启见下�
 | `AGENT_ALERT_PATH` | `logs/alerts.jsonl` | 告警 JSONL 路径（同时以 `[ALERT]` 写到 stderr） |
 | `AGENT_DEBUG` | 未设置 | 设为 `1` 打印工具调用明细 |
 | `AGENT_KEEP_ALIVE` | `30m` | 模型驻留时长（透传 Ollama `keep_alive`） |
+| `AGENT_THINK` | 未设置（关闭） | 设为 `1` 恢复模型思考过程；默认关闭以缩短简单指令等待 |
+| `AGENT_NUM_PREDICT` | `512` | 单次生成的最大 token 数（Ollama `options.num_predict`） |
 | `AGENTD_HOST` / `AGENTD_PORT` | `127.0.0.1` / `8100` | daemon 监听地址 |
 | `AGENTD_TOKEN` | 空 | 非空时除 `/api/health` 外全部要求 `Authorization: Bearer <token>` |
 | `AGENTD_QUEUE_TIMEOUT` | `30`（秒） | 模型锁排队上限，超时返回 429 |

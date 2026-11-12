@@ -19,6 +19,7 @@ DEFAULT_MAX_SESSIONS = 20
 DEFAULT_QUEUE_TIMEOUT = 30.0
 DEFAULT_CONFIRM_TTL = 120.0
 DEFAULT_AGENT_DB_PATH = "data/agent.db"
+DEFAULT_NUM_PREDICT = 512
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,16 @@ class AgentSettings:
     queue_timeout: float = DEFAULT_QUEUE_TIMEOUT
     confirm_ttl: float = DEFAULT_CONFIRM_TTL
     agent_db_path: str = DEFAULT_AGENT_DB_PATH
+    # 默认关闭模型思考过程并限制输出长度，简单指令仍走快路径，复杂指令才用模型。
+    think: bool = False
+    num_predict: int = DEFAULT_NUM_PREDICT
+
+
+def _env_flag(raw: str, fallback: bool) -> bool:
+    value = raw.strip().lower()
+    if not value:
+        return fallback
+    return value in {"1", "true", "yes", "on"}
 
 
 def _positive_int(raw: str, fallback: int) -> int:
@@ -81,4 +92,6 @@ def load_settings() -> AgentSettings:
         ),
         confirm_ttl=_positive_float(os.environ.get("AGENT_CONFIRM_TTL", ""), DEFAULT_CONFIRM_TTL),
         agent_db_path=(os.environ.get("AGENTD_DB_PATH") or DEFAULT_AGENT_DB_PATH).strip(),
+        think=_env_flag(os.environ.get("AGENT_THINK", ""), False),
+        num_predict=_positive_int(os.environ.get("AGENT_NUM_PREDICT", ""), DEFAULT_NUM_PREDICT),
     )

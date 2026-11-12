@@ -15,6 +15,7 @@ from mcp.client.stdio import stdio_client
 
 from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings
+from homelink_agent.fastpath import match_devices, parse_simple_control, pick_command
 from homelink_agent.intent_guard import (
     requires_clarification,
     requires_context_followup,
@@ -231,6 +232,13 @@ class HomeAgent:
                 self._audit.write("turn_end", reply=reply)
                 return reply
 
+            # 确定性快路径：「关闭风扇」这类明确指令直接执行，不进入模型循环。
+            if not needs_state_query:
+                fast_reply = await self._try_fast_path(session, user_text, turn_id)
+                if fast_reply is not None:
+                    self._audit.write("turn_end", reply=fast_reply)
+                    return fast_reply
+
             for _ in range(self._settings.max_steps):
                 message = await self._chat(self._settings, messages, tools)
                 calls = message.get("tool_calls") or []
@@ -394,6 +402,56 @@ class HomeAgent:
         else:
             self._pending_device = None
         return {"role": "tool", "tool_name": name, "content": text or "（无输出）"}
+
+    async def _try_fast_path(
+        self, session: ClientSession, user_text: str, turn_id: str
+    ) -> str | None:
+        """明确的「开/关某设备」直接执行；任何一步不确定都交回模型。"""
+
+        parsed = parse_simple_control(user_text)
+        if parsed is None:
+            return None
+        find_call = {"function": {"name": "home_find_devices", "arguments": {}}}
+        message = await self._call_tool(session, find_call, None, turn_id)
+        payload = _json_payload(str(message.get("content") or ""))
+        if payload is None:
+            return None
+        devices = [item for item in payload.get("devices") or [] if isinstance(item, dict)]
+        hits = match_devices(devices, parsed.target)
+        if len(hits) != 1:
+            self._audit.write(
+                "fastpath_skipped",
+                user=user_text,
+                reason="ambiguous" if hits else "no_match",
+                candidates=len(hits),
+            )
+            return None
+        device = hits[0]
+        if str(device.get("risk_level") or "") == "high":
+            return None
+        command = pick_command(device, parsed.direction)
+        if command is None:
+            return None
+        control_call = {
+            "function": {
+                "name": "home_control_device",
+                "arguments": {
+                    "device_id": str(device.get("device_id") or ""),
+                    "command": command,
+                },
+            }
+        }
+        result_message = await self._call_tool(session, control_call, None, turn_id)
+        result = _json_payload(str(result_message.get("content") or ""))
+        if result is None or result.get("status") != "sent":
+            return None
+        self._audit.write(
+            "fastpath_matched",
+            user=user_text,
+            device_id=device.get("device_id"),
+            command=command,
+        )
+        return _control_reply(str(device.get("name") or ""), command, user_text)
 
     def _remember_devices(self, payload: dict[str, Any] | None) -> None:
         """缓存 device_id → name，供控制成功后的一句话回复使用。"""

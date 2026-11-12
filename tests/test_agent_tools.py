@@ -25,7 +25,7 @@ from homelink_agent.agent import (  # noqa: E402
     _unwrap,
 )  # noqa: E402
 from homelink_agent.audit import AuditLog  # noqa: E402
-from homelink_agent.config import load_settings  # noqa: E402
+from homelink_agent.config import DEFAULT_NUM_PREDICT, load_settings  # noqa: E402
 from homelink_agent.intent_guard import (  # noqa: E402
     requires_clarification,
     requires_context_followup,
@@ -344,6 +344,26 @@ def test_settings_default_audit_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENT_AUDIT_PATH", raising=False)
 
     assert load_settings().audit_path == "logs/agent-audit.jsonl"
+
+
+def test_settings_default_model_speed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENT_THINK", raising=False)
+    monkeypatch.delenv("AGENT_NUM_PREDICT", raising=False)
+
+    settings = load_settings()
+
+    assert settings.think is False  # 默认关闭思考过程
+    assert settings.num_predict == DEFAULT_NUM_PREDICT
+
+
+def test_settings_model_speed_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_THINK", "1")
+    monkeypatch.setenv("AGENT_NUM_PREDICT", "128")
+
+    settings = load_settings()
+
+    assert settings.think is True
+    assert settings.num_predict == 128
 
 
 def test_confirm_denied_is_audited(tmp_path: Path) -> None:
@@ -734,7 +754,44 @@ class _JsonSession:
 
 
 _DEVICES_JSON = json.dumps(
-    {"count": 1, "devices": [{"device_id": "dev_fan", "name": "风扇"}]}, ensure_ascii=False
+    {
+        "count": 1,
+        "devices": [
+            {
+                "device_id": "dev_fan",
+                "name": "风扇",
+                "type": "fan",
+                "room": "bedroom",
+                "risk_level": "low",
+                "capabilities": [{"command": "开关", "command_id": "fn_c4a71e4a"}],
+            }
+        ],
+    },
+    ensure_ascii=False,
+)
+_TWO_FANS_JSON = json.dumps(
+    {
+        "count": 2,
+        "devices": [
+            {
+                "device_id": "dev_fan",
+                "name": "风扇",
+                "type": "fan",
+                "room": "bedroom",
+                "risk_level": "low",
+                "capabilities": [{"command": "开关", "command_id": "fn_c4a71e4a"}],
+            },
+            {
+                "device_id": "dev_fan2",
+                "name": "风扇 2",
+                "type": "fan",
+                "room": "living_room",
+                "risk_level": "low",
+                "capabilities": [{"command": "开关", "command_id": "fn_c4a71e4b"}],
+            },
+        ],
+    },
+    ensure_ascii=False,
 )
 _CONTROL_SENT_JSON = json.dumps(
     {"request_id": "ag-1-2", "status": "sent", "device_id": "dev_fan", "command": "开关"},
@@ -794,7 +851,42 @@ def test_control_success_returns_one_line_without_final_model_call() -> None:
     )
 
     assert reply == "风扇已关闭"
-    assert len(rounds) == 2  # 成功模板回复替代第三轮模型调用
+    assert rounds == []  # 快路径全程不调用模型
+    assert [name for name, _ in session.calls] == ["home_find_devices", "home_control_device"]
+
+
+def test_ambiguous_target_falls_back_to_model_template() -> None:
+    rounds: list[int] = []
+
+    async def fake_chat(
+        settings: Any, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        rounds.append(len(messages))
+        return {
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "home_control_device",
+                        "arguments": {"device_id": "dev_fan", "command": "开关"},
+                    }
+                }
+            ]
+        }
+
+    agent = HomeAgent(replace(load_settings(), audit_path="off"), chat_fn=fake_chat)
+    session = _JsonSession(
+        {
+            "home_find_devices": (_TWO_FANS_JSON, False),
+            "home_control_device": (_CONTROL_SENT_JSON, False),
+        }
+    )
+
+    reply = asyncio.run(
+        agent.respond(cast(ClientSession, session), [{"type": "function"}], "关闭风扇")
+    )
+
+    assert reply == "风扇已关闭"
+    assert len(rounds) == 1  # 两台风扇无法唯一命中，交回模型
     assert [name for name, _ in session.calls] == ["home_find_devices", "home_control_device"]
 
 

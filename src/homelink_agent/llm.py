@@ -22,7 +22,11 @@ async def chat(
         "model": settings.model,
         "messages": messages,
         "stream": False,
+        # 显式开关思考过程：默认关闭，减少「关闭风扇」这类指令的等待时间。
+        "think": settings.think,
     }
+    if settings.num_predict > 0:
+        body["options"] = {"num_predict": settings.num_predict}
     if tools:
         body["tools"] = tools
     if settings.keep_alive:
