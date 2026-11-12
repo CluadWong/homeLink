@@ -20,10 +20,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from homelink_agent.alerts import AlertFn, emit
 from homelink_agent.audit import AuditLog
 
 _RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 AGENT_SCHEMA_VERSION = 1
+# 连续失败达到这个次数才告警：偶发一次网关抖动不打扰用户。
+ALERT_AFTER_FAILURES = 3
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedules (
     id          TEXT PRIMARY KEY,
@@ -329,6 +332,7 @@ class Scheduler:
         clock: Callable[[], datetime] = datetime.now,
         sync: LoadScenePlans | None = None,
         sync_seconds: float = 300.0,
+        alert: AlertFn | None = None,
     ) -> None:
         self._store = store
         self._runner = runner
@@ -337,6 +341,8 @@ class Scheduler:
         self._clock = clock
         self._sync = sync
         self._sync_seconds = sync_seconds
+        self._alert: AlertFn = alert or _emit_alert
+        self._failures: dict[str, int] = {}
         self._last_sync: datetime | None = None
         self._last_minute: str | None = None
 
@@ -400,6 +406,18 @@ class Scheduler:
                         scene_id=schedule.scene_id,
                         error=error,
                     )
+            if error is not None:
+                failures = self._failures.get(schedule.id, 0) + 1
+                self._failures[schedule.id] = failures
+                if failures == ALERT_AFTER_FAILURES:
+                    self._alert(
+                        "schedule_failed",
+                        f"定时任务连续失败 {failures} 次",
+                        schedule.id,
+                        error,
+                    )
+            else:
+                self._failures.pop(schedule.id, None)
             executed.append(
                 {
                     "schedule_id": schedule.id,
@@ -409,6 +427,10 @@ class Scheduler:
                 }
             )
         return executed
+
+
+def _emit_alert(kind: str, message: str, key: str, detail: str | None) -> None:
+    emit(kind, message, key=key, detail=detail)
 
 
 def dump_schedule(schedule: Schedule) -> dict[str, Any]:

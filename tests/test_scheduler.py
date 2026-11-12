@@ -277,6 +277,62 @@ def test_scheduler_runs_due_schedule_once_per_minute() -> None:
     assert runs == [first[0]["schedule_id"], first[0]["schedule_id"]]
 
 
+def test_scheduler_alerts_after_three_consecutive_failures() -> None:
+    store = _store_with(("scene-1", True))
+    alerts: list[tuple[str, str, str, str | None]] = []
+
+    async def runner(schedule: Schedule) -> None:
+        raise RuntimeError("网关超时")
+
+    scheduler = Scheduler(
+        store,
+        runner,
+        alert=lambda kind, message, key, detail: alerts.append((kind, message, key, detail)),
+    )
+    try:
+        for day in range(3):
+            asyncio.run(scheduler.tick(datetime(2026, 11, 10 + day, 7, 0)))
+        assert len(alerts) == 1
+        kind, message, key, detail = alerts[0]
+        assert kind == "schedule_failed"
+        assert key == store.list_all()[0].id
+        assert "3" in message
+        assert detail is not None and "网关超时" in detail
+
+        # 第 4 次失败不重复告警，避免每分钟刷屏
+        asyncio.run(scheduler.tick(datetime(2026, 11, 13, 7, 0)))
+        assert len(alerts) == 1
+    finally:
+        store.close()
+
+
+def test_scheduler_resets_failure_count_after_success() -> None:
+    store = _store_with(("scene-1", True))
+    alerts: list[tuple[str, str, str, str | None]] = []
+    attempts: list[int] = []
+
+    async def runner(schedule: Schedule) -> None:
+        attempts.append(1)
+        if len(attempts) <= 3 or len(attempts) >= 5:
+            raise RuntimeError("偶发失败")
+
+    scheduler = Scheduler(
+        store,
+        runner,
+        alert=lambda kind, message, key, detail: alerts.append((kind, message, key, detail)),
+    )
+    try:
+        for day in range(3):
+            asyncio.run(scheduler.tick(datetime(2026, 11, 10 + day, 7, 0)))
+        assert len(alerts) == 1
+        asyncio.run(scheduler.tick(datetime(2026, 11, 13, 7, 0)))  # 成功一次，计数清零
+        for day in range(3):
+            asyncio.run(scheduler.tick(datetime(2026, 11, 14 + day, 7, 0)))
+        assert len(alerts) == 2
+    finally:
+        store.close()
+
+
 def test_scheduler_skips_disabled_and_records_failure_without_retry() -> None:
     store = _store_with(("s-ok", True), ("s-off", False), ("s-bad", True))
 

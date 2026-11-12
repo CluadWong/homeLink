@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import RequestResponseEndpoint
 
 from homelink_agent.agent import HomeAgent
+from homelink_agent.alerts import emit
 from homelink_agent.audit import AuditLog
 from homelink_agent.config import AgentSettings, load_settings
 from homelink_agent.instance_lock import InstanceLock
@@ -374,6 +375,7 @@ def create_agent_app(
                     await warm_model(settings)
                 except OllamaError as exc:  # 预热失败不拦启动，首轮提问会给出同样报错
                     print(f"警告：{exc}", file=sys.stderr, flush=True)
+                    emit("ollama_unavailable", "启动预热失败", key="warmup", detail=str(exc))
         if start_scheduler:
             # 启动先同步一次场景定时触发器；后端不可用不拦启动，等下一轮再试
             try:
@@ -413,7 +415,18 @@ def create_agent_app(
 
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
-        await conn.ensure()
+        try:
+            await conn.ensure()
+        except Exception as exc:  # MCP 拉起失败：503 + 告警，避免只留一条 500 栈
+            emit(
+                "mcp_offline",
+                "MCP 连接建立失败",
+                key="ensure",
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+            raise HTTPException(
+                status_code=503, detail="本地 MCP 服务不可用，请检查 homelink_mcp 安装与日志"
+            ) from exc
         session_id = payload.session_id or uuid.uuid4().hex[:12]
         item = store.get(session_id)
         started = time.perf_counter()
@@ -433,9 +446,16 @@ def create_agent_app(
                 )
             except OllamaError as exc:
                 metrics.record_request(error=True, latency_ms=_elapsed_ms(started))
+                emit("ollama_unavailable", "Ollama 调用失败", key="chat", detail=str(exc))
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
             except Exception as exc:  # MCP 掉线等：恢复连接但不重发这一轮，避免红外重复
                 metrics.record_request(error=True, latency_ms=_elapsed_ms(started))
+                emit(
+                    "mcp_offline",
+                    "MCP 会话异常，连接已重置",
+                    key="chat",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
                 await conn.stop()
                 raise HTTPException(
                     status_code=502,

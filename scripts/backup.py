@@ -129,7 +129,7 @@ def main() -> int:
     try:
         target = backup_db(db_path, args.output_dir, keep)
     except (FileNotFoundError, RuntimeError, sqlite3.Error) as exc:
-        print(f"备份失败：{exc}", file=sys.stderr)
+        print(f"[ALERT] 备份失败：{exc}", file=sys.stderr)
         return 1
 
     integrity, version = _check_database(target)
@@ -142,7 +142,7 @@ def main() -> int:
         try:
             agent_target = backup_agent_db(agent_path, args.output_dir, keep)
         except (RuntimeError, sqlite3.Error) as exc:
-            print(f"Agent 库备份失败：{exc}", file=sys.stderr)
+            print(f"[ALERT] Agent 库备份失败：{exc}", file=sys.stderr)
             return 1
         if agent_target is None:
             print(f"跳过 Agent 库（不存在）：{agent_path}")
